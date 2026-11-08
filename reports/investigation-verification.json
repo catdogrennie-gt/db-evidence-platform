@@ -1,0 +1,399 @@
+{
+  "database_write_denied": {
+    "status": "passed",
+    "mysql_code": 1142
+  },
+  "investigation": {
+    "id": "3e023986-bff8-4fe0-8674-453d2fd53ca1",
+    "kind": "investigation",
+    "timestamp": "2026-11-07T17:00:10.356130+00:00",
+    "data": {
+      "mode": "live_model",
+      "model": "deepseek-flash",
+      "question": "检查实验orders表的索引与customer_id=1234固定查询。请读取表结构和EXPLAIN补充证据，区分当前事实与历史累计值，不推断生产收益。",
+      "snapshot_id": "fcd7cdf0-4159-4ae5-b149-2d78c93cbe82",
+      "started_at": "2026-11-07T16:59:49.105389+00:00",
+      "tool_calls": [
+        {
+          "id": "86ce4956-0587-4b34-bfc9-def81fec5962",
+          "kind": "tool_call",
+          "timestamp": "2026-11-07T16:59:55.228077+00:00",
+          "data": {
+            "name": "describe_table",
+            "started_at": "2026-11-07T16:59:51.426297+00:00",
+            "arguments": {
+              "table": "orders"
+            },
+            "status": "complete",
+            "evidence_id": "E7",
+            "elapsed_seconds": 3.797
+          }
+        },
+        {
+          "id": "dbaecb57-9500-41c1-ac72-dded8b840dfe",
+          "kind": "tool_call",
+          "timestamp": "2026-11-07T17:00:01.565077+00:00",
+          "data": {
+            "name": "explain_order_lookup",
+            "started_at": "2026-11-07T16:59:55.234602+00:00",
+            "arguments": {},
+            "status": "complete",
+            "evidence_id": "E8",
+            "elapsed_seconds": 6.328
+          }
+        }
+      ],
+      "usage": [
+        {
+          "prompt_tokens": 2056,
+          "completion_tokens": 52,
+          "total_tokens": 2108,
+          "prompt_tokens_details": {
+            "cached_tokens": 0
+          },
+          "prompt_cache_hit_tokens": 0,
+          "prompt_cache_miss_tokens": 2056
+        },
+        {
+          "prompt_tokens": 2725,
+          "completion_tokens": 1206,
+          "total_tokens": 3931,
+          "prompt_tokens_details": {
+            "cached_tokens": 2048
+          },
+          "prompt_cache_hit_tokens": 2048,
+          "prompt_cache_miss_tokens": 677
+        }
+      ],
+      "budget": {
+        "max_rounds": 4,
+        "max_calls": 6,
+        "seconds": 180
+      },
+      "status": "complete",
+      "answer": {
+        "summary": "orders 表当前结构为 id(int, 主键)、customer_id(int, NOT NULL)、amount(int)、note(varchar(100))；存在二级索引 lab_customer_idx(customer_id)，BTREE、可见、非唯一，cardinality 约 3000，主键 cardinality 约 30284。对固定的 customer_id=1234 查询执行 EXPLAIN（未真正执行查询），显示 type=ref、key=lab_customer_idx、key_len=4、ref=const、估算 rows=10、filtered=100%，即当前元数据下该模板查询可走 customer_id 索引，非全表扫描。历史累计 digest 中该语句共执行 30 次，rows_examined 合计 450150、rows_sent 300（约每次扫描 15005 行），与当前存在 lab_customer_idx 的事实不一致，最可能的原因是这些累计值早于索引创建（digest 中可见 ALTER TABLE orders ADD INDEX lab_customer_idx 执行 1 次），但这是推断，无法用现有证据确认时序。所有 status、digest 数据均为累计或单点快照，不能代表当前语句耗时、当前负载或趋势，也不能据此推断生产环境收益或 SLA。",
+        "findings": [
+          {
+            "title": "orders 表结构与 customer_id 二级索引当前存在且可见",
+            "evidence_ids": [
+              "E7",
+              "E5"
+            ],
+            "reasoning": "describe_table(E7) 给出当前列定义和两个索引：PRIMARY(id, Non_unique=0, cardinality≈30284) 和 lab_customer_idx(customer_id, Non_unique=1, BTREE, Visible=YES, cardinality≈3000)；indexes 快照(E5) 同样列出 orders 的 lab_customer_idx(customer_id) 与 PRIMARY(id)，两者一致，属已观察的当前事实。",
+            "next_readonly_check": "无需重复采集；如需时序可只读查询 SHOW INDEX 或 information_schema.statistics 对比 cardinality 变化（非本次必需）。"
+          },
+          {
+            "title": "固定查询 customer_id=1234 的 EXPLAIN 使用 lab_customer_idx 且为 ref 访问",
+            "evidence_ids": [
+              "E8",
+              "E7"
+            ],
+            "reasoning": "E8 为只读 EXPLAIN（不执行查询）：type=ref、possible_keys=key=lab_customer_idx、key_len=4（int 单列）、ref=const、rows=10、filtered=100%、Extra 为空，说明当前优化器元数据下该模板按 customer_id 索引等值查找，估算约 10 行，无 filesort/临时表标记。仅适用于该实验模板，不能外推到其他 SQL。",
+            "next_readonly_check": "如需确认估算与真实行数偏差，可在只读会话中执行 EXPLAIN ANALYZE 同模板（会实际执行，需确认可接受）；否则以 info schema 统计为限。"
+          },
+          {
+            "title": "历史累计 digest 与当前索引事实存在不一致，需按时间解释而非当前现状",
+            "evidence_ids": [
+              "E4",
+              "E5",
+              "E7",
+              "E8"
+            ],
+            "reasoning": "E4 中 SELECT * FROM orders WHERE customer_id=? 执行 30 次、rows_examined 累计 450150、rows_sent 300（约 15005 行/次），且在 E4 中同时出现 ALTER TABLE orders ADD INDEX lab_customer_idx 执行 1 次；而 E5/E7/E8 显示索引现已存在且被使用。因此高扫描量的累计值更可能来自索引建立之前的历史执行，属推断而非已观察时序事实；这些计数器为累计值，不能当作当前语句代价。",
+            "next_readonly_check": "只读查询 performance_schema.events_statements_summary_by_digest 的 FIRST_SEEN/LAST_SEEN 列，以确认高扫描量是否早于索引创建。"
+          },
+          {
+            "title": "服务器状态为单点快照，无法推断趋势或当前负载结论",
+            "evidence_ids": [
+              "E2",
+              "E6",
+              "E3"
+            ],
+            "reasoning": "E2 为累计计数器（Questions=622、Slow_queries=1、buffer_pool_read_requests=28393、reads=979、row_lock_current_waits=0、Uptime=1558s），单次观察不能得出速率/趋势；E6 显示 1 分钟负载 0.08、内存与磁盘使用率 15%，只是单一时间点；E3 当前无锁等待，仅表示采集时未捕获等待，不能排除历史锁问题。故不能据此得出性能或瓶颈结论。",
+            "next_readonly_check": "如需趋势，可在只读会话中间隔多次采集 SHOW GLOBAL STATUS 与 uptime 差值计算速率（本任务不强制）。"
+          }
+        ],
+        "unknowns": [
+          "历史 450150 行扫描是否确实全部发生在 lab_customer_idx 创建之前，缺少 FIRST_SEEN/LAST_SEEN 证据，仅能推断。",
+          "该固定查询回归索引后的真实执行代价（实际行数、逻辑读、耗时）未知，EXPLAIN 仅为优化器估算，未执行查询。",
+          "customer_id=1234 的实际匹配行数与索引选择性（cardinality≈3000，可重复值分布）未知。",
+          "历史是否存在 CPU、IO 或锁等待问题未知：当前仅有单点快照和累计值，无历史采样序列。",
+          "该实验结论不能外推到生产环境收益、SLA 或其他查询模板。"
+        ]
+      },
+      "evidence_snapshot_id": "69a7f213-b599-40f0-9df9-8f3ac8ea7740",
+      "elapsed_seconds": 21.25,
+      "finished_at": "2026-11-07T17:00:10.356130+00:00"
+    }
+  },
+  "evidence": {
+    "id": "69a7f213-b599-40f0-9df9-8f3ac8ea7740",
+    "kind": "snapshot",
+    "timestamp": "2026-11-07T17:00:10.349975+00:00",
+    "data": {
+      "purpose": "investigation",
+      "status": "complete",
+      "evidence": [
+        {
+          "id": "E1",
+          "source": "mysql.identity",
+          "collected_at": "2026-11-07T16:59:42.956576+00:00",
+          "value": [
+            {
+              "uuid": "cc6b496a-dac5-11f1-bcb8-000c292bd467",
+              "version": "8.4.5",
+              "port": 3307,
+              "hostname": "localhost.localdomain"
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E2",
+          "source": "mysql.status",
+          "collected_at": "2026-11-07T16:59:42.957603+00:00",
+          "value": [
+            {
+              "Variable_name": "Innodb_buffer_pool_read_requests",
+              "Value": "28393"
+            },
+            {
+              "Variable_name": "Innodb_buffer_pool_reads",
+              "Value": "979"
+            },
+            {
+              "Variable_name": "Innodb_row_lock_current_waits",
+              "Value": "0"
+            },
+            {
+              "Variable_name": "Questions",
+              "Value": "622"
+            },
+            {
+              "Variable_name": "Slow_queries",
+              "Value": "1"
+            },
+            {
+              "Variable_name": "Threads_connected",
+              "Value": "1"
+            },
+            {
+              "Variable_name": "Threads_running",
+              "Value": "2"
+            },
+            {
+              "Variable_name": "Uptime",
+              "Value": "1558"
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E3",
+          "source": "mysql.lock_waits",
+          "collected_at": "2026-11-07T16:59:42.960738+00:00",
+          "value": [],
+          "mode": "live"
+        },
+        {
+          "id": "E4",
+          "source": "mysql.sql_digest",
+          "collected_at": "2026-11-07T16:59:42.963144+00:00",
+          "value": [
+            {
+              "digest": "UPDATE `accounts` SET `balance` = `balance` + ? WHERE `id` = ?",
+              "executions": 2,
+              "total_seconds": "13.5400",
+              "rows_examined": 2,
+              "rows_sent": 0
+            },
+            {
+              "digest": "SELECT `DIGEST_TEXT` AS `digest` , `COUNT_STAR` AS `executions` , `ROUND` ( `SUM_TIMER_WAIT` / ?, ... ) AS `total_seconds` , `SUM_ROWS_EXAMINED` AS `rows_examined` , `SUM_ROWS_SENT` AS `rows_sent` FROM `performance_schema` . `events_statements_summary_by_digest` WHERE SCHEMA_NAME = ? AND `DIGEST_TEXT` IS NOT NULL ORDER BY `SUM_TIMER_WAIT` DESC LIMIT ?",
+              "executions": 54,
+              "total_seconds": "0.0840",
+              "rows_examined": 2240,
+              "rows_sent": 430
+            },
+            {
+              "digest": "SELECT * FROM `orders` WHERE `customer_id` = ?",
+              "executions": 30,
+              "total_seconds": "0.0793",
+              "rows_examined": 450150,
+              "rows_sent": 300
+            },
+            {
+              "digest": "SELECT SQL_NO_CACHE * FROM `orders`",
+              "executions": 3,
+              "total_seconds": "0.0620",
+              "rows_examined": 90000,
+              "rows_sent": 90000
+            },
+            {
+              "digest": "SELECT TABLE_NAME AS TABLE_NAME , `INDEX_NAME` AS `index_name` , COLUMN_NAME AS COLUMN_NAME FROM `information_schema` . `statistics` WHERE `TABLE_SCHEMA` = ?",
+              "executions": 54,
+              "total_seconds": "0.0593",
+              "rows_examined": 1453,
+              "rows_sent": 161
+            },
+            {
+              "digest": "SHOW GLOBAL STATUS WHERE `Variable_name` IN (...)",
+              "executions": 55,
+              "total_seconds": "0.0503",
+              "rows_examined": 440,
+              "rows_sent": 440
+            },
+            {
+              "digest": "ALTER TABLE `orders` ADD INDEX `lab_customer_idx` ( `customer_id` )",
+              "executions": 1,
+              "total_seconds": "0.0468",
+              "rows_examined": 0,
+              "rows_sent": 0
+            },
+            {
+              "digest": "SELECT * FROM `orders` ORDER BY `id`",
+              "executions": 4,
+              "total_seconds": "0.0397",
+              "rows_examined": 120000,
+              "rows_sent": 120000
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E5",
+          "source": "mysql.indexes",
+          "collected_at": "2026-11-07T16:59:42.965153+00:00",
+          "value": [
+            {
+              "table_name": "accounts",
+              "index_name": "PRIMARY",
+              "column_name": "id"
+            },
+            {
+              "table_name": "orders",
+              "index_name": "lab_customer_idx",
+              "column_name": "customer_id"
+            },
+            {
+              "table_name": "orders",
+              "index_name": "PRIMARY",
+              "column_name": "id"
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E6",
+          "source": "linux.host",
+          "collected_at": "2026-11-07T16:59:49.094945+00:00",
+          "value": "0.08 0.08 0.03 1/229 2680\nMemTotal:        3734344 kB\nMemFree:         2324200 kB\nMemAvailable:     852224 kB\nBuffers:            2124 kB\nCached:           209860 kB\n/dev/mapper/ol-root    18552832 2724644  15828188      15% /\n",
+          "mode": "live"
+        },
+        {
+          "source": "mysql.tool.describe_table",
+          "instance_uuid": "cc6b496a-dac5-11f1-bcb8-000c292bd467",
+          "collected_at": "2026-11-07T16:59:55.228077+00:00",
+          "mode": "live",
+          "value": {
+            "columns": [
+              {
+                "Field": "id",
+                "Type": "int",
+                "Null": "NO",
+                "Key": "PRI",
+                "Default": null,
+                "Extra": ""
+              },
+              {
+                "Field": "customer_id",
+                "Type": "int",
+                "Null": "NO",
+                "Key": "MUL",
+                "Default": null,
+                "Extra": ""
+              },
+              {
+                "Field": "amount",
+                "Type": "int",
+                "Null": "NO",
+                "Key": "",
+                "Default": null,
+                "Extra": ""
+              },
+              {
+                "Field": "note",
+                "Type": "varchar(100)",
+                "Null": "YES",
+                "Key": "",
+                "Default": null,
+                "Extra": ""
+              }
+            ],
+            "indexes": [
+              {
+                "Table": "orders",
+                "Non_unique": 0,
+                "Key_name": "PRIMARY",
+                "Seq_in_index": 1,
+                "Column_name": "id",
+                "Collation": "A",
+                "Cardinality": 30284,
+                "Sub_part": null,
+                "Packed": null,
+                "Null": "",
+                "Index_type": "BTREE",
+                "Comment": "",
+                "Index_comment": "",
+                "Visible": "YES",
+                "Expression": null
+              },
+              {
+                "Table": "orders",
+                "Non_unique": 1,
+                "Key_name": "lab_customer_idx",
+                "Seq_in_index": 1,
+                "Column_name": "customer_id",
+                "Collation": "A",
+                "Cardinality": 3000,
+                "Sub_part": null,
+                "Packed": null,
+                "Null": "",
+                "Index_type": "BTREE",
+                "Comment": "",
+                "Index_comment": "",
+                "Visible": "YES",
+                "Expression": null
+              }
+            ]
+          },
+          "id": "E7"
+        },
+        {
+          "source": "mysql.tool.explain_order_lookup",
+          "instance_uuid": "cc6b496a-dac5-11f1-bcb8-000c292bd467",
+          "collected_at": "2026-11-07T17:00:01.565077+00:00",
+          "mode": "live",
+          "value": [
+            {
+              "id": 1,
+              "select_type": "SIMPLE",
+              "table": "orders",
+              "partitions": null,
+              "type": "ref",
+              "possible_keys": "lab_customer_idx",
+              "key": "lab_customer_idx",
+              "key_len": "4",
+              "ref": "const",
+              "rows": 10,
+              "filtered": 100.0,
+              "Extra": null
+            }
+          ],
+          "id": "E8"
+        }
+      ],
+      "errors": []
+    }
+  }
+}

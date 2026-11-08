@@ -1,0 +1,5 @@
+{
+  "write_uuid_guard": "passed",
+  "restore_source_uuid_guard": "passed",
+  "provision_refuses_existing": "passed"
+}

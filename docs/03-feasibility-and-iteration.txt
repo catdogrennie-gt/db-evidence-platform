@@ -1,0 +1,63 @@
+可行性与迭代计划 v2 — 2026-11-08
+
+方法参考
+GitHub Spec Kit https://github.github.com/spec-kit/ ：需求、设计、任务与最终收敛，分开写清目的和实现。
+https://github.com/github/spec-kit/blob/main/templates/spec-template.md
+https://github.com/github/spec-kit/blob/main/templates/plan-template.md
+Superpowers计划/验证规范：
+https://github.com/obra/superpowers/blob/main/skills/writing-plans/SKILL.md
+https://github.com/obra/superpowers/blob/main/skills/verification-before-completion/SKILL.md
+上述资料已下载到仓库外research/workflow-references，仅作方法参考；没有把整个框架安装或全局启用。采用职责清晰、任务可独立验证、完成前看证据；不引入等待睡眠用户反复确认的流程。用户已授权本地自主取舍。
+
+可行性证据
+F01 MySQL/Linux真实采集：已有reports/verification.json和restart-check.json，实际启动、关停再启动和六来源恢复有记录。
+F02 两种故障可复现：已有lock与index演练；早期锁等待窗口太短造成超时，延长后completed，历史失败保留。不能概括成每次都成功。
+F03 模型结构化解释：已有DeepSeek真实调用及引用校验；受限工具补证据的功能对照见control-verification.json。单个实验不构成诊断准确率或生产收益证明。
+F04 工具调用协议：仓库外research/function-calling-feasibility.json记录本次结构化调用与结果回传。使用合成version fixture，只证明协议，不是真实数据库诊断。
+F05 写目标保护：reports/protection-checks.json记录错误UUID与已有目录拒绝。reports/investigation-verification.json记录只读账号UPDATE被MySQL以1142拒绝。
+F06 资源：现有一台4GB/2vCPU VM加宿主Python足够支持当前小数据集；无大模型本地推理必要条件，不以安装Docker或向量库为前提。
+F07 外部框架：仅文档研究，尚未安装/独立复验，不作为已验证依赖。
+
+后续实测进展
+受限工具编排investigation.py和POST /api/investigate已实现，前端可查看最近调用审计与原始报告。窗口差分metrics.py已实现，UUID变化、Uptime倒退、计数倒退、非正时间间隔、缺样本均拒绝比较。
+11项保护测试后增加窗口测试，目前17项测试通过（具体运行时输出仍需在最终交付前复核）。真实只读数据库账号拒绝UPDATE（1142），真实模型调用describe_table与explain_order_lookup并输出有效引用，报告见reports/investigation-verification.json。
+首次锁诊断评估把完整锁证据放在初始快照，又要求模型必须重复采集，导致“未调用get_lock_waits”的断言失败；回答本身保留了正确初始证据，不能据此算模型诊断错误。测试改为明确标记的live证据子集，不提供锁关系，让模型补采。足够证据时零工具调用是允许行为，工具次数不是质量目标。
+
+实际迭代记录
+- 缺失来源的初始证据编号不连续，早期用数组长度分配新ID会重号；改为最大编号递增，加入稀疏编号回归检查。
+- 锁清理断言连续失败，保存中间结果后确认等待已为空，真实原因是PyMySQL空元组与空列表类型不同。查询边界统一为list，补回归测试；不能把此问题描述为数据库事务残留。
+- 语义核对发现通用lock_mode字段容易混淆请求锁与持有锁；查询加入阻塞锁关联、明确waiting_lock_mode和blocking_lock_mode及索引名，重新跑真实故障。
+- 固定快照对照两次输出空引用finding，均被校验拒绝，没有作为成功报告。明确把未知放unknowns；固定分析最多增加一次格式纠正，保留每次原始模型内容、校验错误和usage，再次失败仍拒绝。
+- 20项保护/失败路径测试通过；实时故障结果、模型输出、调用用量和清理证据见reports。最终状态以04-acceptance.txt为准。
+
+以下为实施任务分解，最终完成状态见04-acceptance.txt。
+
+迭代一：需求与契约
+交付01-requirements、02-architecture、本文；核对每个P0有负责模块和验收项。设计变更说明原因，避免代码与文档分离。
+
+迭代二：受限诊断主链路
+文件：新增investigation.py，修改app.py，新增tests/test_investigation.py。
+接口：investigate(snapshot_id:str, question:str)->Record；execute_read_tool(name:str,arguments:dict)->Evidence；validate_answer(answer:dict,evidence_ids:set)->None。
+工具：预定义状态、锁关系、索引/结构、实验查询EXPLAIN；无任意SQL/Shell入口。参数额外字段拒绝、模型调用预算限制、有效引用校验。
+验收：未知工具和非法参数不能触达数据库；重复调用不重放；不存在的证据不能进入成功报告；断连和模型错误保留记录；实际只读账号写拒绝。先测试失败路径，再接真实模型端到端。
+
+迭代三：时间关联与演练评估
+文件：窗口差分函数、tests/test_metrics.py、verify_diagnosis.py、reports/diagnosis-verification.json。
+输入：同实例两个采样与故障中/修复后证据。输出：明确时间窗、差分或不可比较原因。
+验收：实例重启/UUID不同/倒退拒绝计算；锁等待和索引场景分别真实运行，健康与缺证据反例不能给出已确认根因。对比基线和主动补证据，逐条列事实/遗漏/耗时/调用量，不用模型评分替代真值。
+
+迭代四：可读的故障工作台
+文件：web/index.html或职责分离后的本地静态文件，保持现有启动入口。
+信息结构：事件摘要→工具过程→证据→原因/未知→修复后对比；优先锁关系和计划对比，备份作为附属。
+验收：桌面/窄屏可用；原始记录能追溯；输出HTML转义；错误显示不健康；调用过程中不误显示已完成。
+
+迭代五：收敛与交付
+更新README/DEMO/PORTFOLIO、依赖与配置、真实报告、截图、本地提交。按FR逐项检查已完成/部分/未做。
+达到验收条件即交付，不为占满开发时间扩范围。源码发布另行按明确指令处理；所有邮件仅由用户本人发送。
+
+冻结条件
+核心事实判断不稳、实验不可复现、无效引用或权限边界失败时，停止新功能，优先修复。若复杂框架收益不清，保留小实现；不为看起来专业堆微服务、Agent数量或组件。
+
+上午迭代补全
+用户指出提前结束和UI阻塞未闭环，09:28重新安排，按验收目标推进。新增incidents.py把CLI已证明的故障期间补证整合为页面完整案例，给出阶段进度和清理独立验收。09:33—09:35页面两条案例通过，后续真实HTTP复验、409互斥、真实实验库中的受控模型超时清理均通过，见incident-verification.json。
+长时间运行后发现采集自身SQL挤占摘要，改为无业务默认库连接、精确单列已知模板、保留历史与采样范围。语义复核发现SUM_LOCK_TIME误作行锁时间建议，查官方资料纠正提示，并补真正等待起点和数据库时区。上述迭代以真实运行及错误驱动，没有改写历史模型回答。

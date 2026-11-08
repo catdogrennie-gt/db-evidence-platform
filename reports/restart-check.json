@@ -1,0 +1,191 @@
+{
+  "status": "passed",
+  "method": "VMware soft shutdown then resume_environment.py start",
+  "source_data_and_schema_unchanged": true,
+  "post_restart_snapshot": {
+    "id": "33b1b7e4-a6a1-4a38-8f03-7bcbb8b51992",
+    "kind": "snapshot",
+    "timestamp": "2026-11-07T16:34:39.682913+00:00",
+    "data": {
+      "status": "complete",
+      "evidence": [
+        {
+          "id": "E1",
+          "source": "mysql.identity",
+          "collected_at": "2026-11-07T16:34:33.508461+00:00",
+          "value": [
+            {
+              "uuid": "cc6b496a-dac5-11f1-bcb8-000c292bd467",
+              "version": "8.4.5",
+              "port": 3307,
+              "hostname": "localhost.localdomain"
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E2",
+          "source": "mysql.status",
+          "collected_at": "2026-11-07T16:34:33.509469+00:00",
+          "value": [
+            {
+              "Variable_name": "Innodb_buffer_pool_read_requests",
+              "Value": "16469"
+            },
+            {
+              "Variable_name": "Innodb_buffer_pool_reads",
+              "Value": "949"
+            },
+            {
+              "Variable_name": "Innodb_row_lock_current_waits",
+              "Value": "0"
+            },
+            {
+              "Variable_name": "Questions",
+              "Value": "22"
+            },
+            {
+              "Variable_name": "Slow_queries",
+              "Value": "0"
+            },
+            {
+              "Variable_name": "Threads_connected",
+              "Value": "1"
+            },
+            {
+              "Variable_name": "Threads_running",
+              "Value": "2"
+            },
+            {
+              "Variable_name": "Uptime",
+              "Value": "49"
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E3",
+          "source": "mysql.lock_waits",
+          "collected_at": "2026-11-07T16:34:33.511700+00:00",
+          "value": [],
+          "mode": "live"
+        },
+        {
+          "id": "E4",
+          "source": "mysql.sql_digest",
+          "collected_at": "2026-11-07T16:34:33.513697+00:00",
+          "value": [
+            {
+              "digest": "SELECT * FROM `orders` ORDER BY `id`",
+              "executions": 1,
+              "total_seconds": "0.0147",
+              "rows_examined": 30000,
+              "rows_sent": 30000
+            },
+            {
+              "digest": "SELECT * FROM `accounts` ORDER BY `id`",
+              "executions": 1,
+              "total_seconds": "0.0093",
+              "rows_examined": 2,
+              "rows_sent": 2
+            },
+            {
+              "digest": "SELECT COLUMN_NAME , `COLUMN_TYPE` , `IS_NULLABLE` , `COLUMN_DEFAULT` , `EXTRA` FROM `information_schema` . `columns` WHERE `TABLE_SCHEMA` = ? AND TABLE_NAME = ? ORDER BY `ORDINAL_POSITION`",
+              "executions": 2,
+              "total_seconds": "0.0057",
+              "rows_examined": 34,
+              "rows_sent": 6
+            },
+            {
+              "digest": "SHOW GLOBAL STATUS WHERE `Variable_name` IN (...)",
+              "executions": 2,
+              "total_seconds": "0.0054",
+              "rows_examined": 16,
+              "rows_sent": 16
+            },
+            {
+              "digest": "SELECT `w` . `REQUESTING_ENGINE_TRANSACTION_ID` AS `waiting_trx` , `w` . `BLOCKING_ENGINE_TRANSACTION_ID` AS `blocking_trx` , `w` . `REQUESTING_THREAD_ID` AS `waiting_thread` , `w` . `BLOCKING_THREAD_ID` AS `blocking_thread` , `l` . `OBJECT_SCHEMA` AS `db_name` , `l` . `OBJECT_NAME` AS TABLE_NAME , `l` . `INDEX_NAME` AS `index_name` , `l` . `LOCK_MODE` AS `waiting_lock_mode` , `l` . `LOCK_TYPE` AS `waiting_lock_type` , `rt` . `trx_query` AS `waiting_query` , `rt` . `trx_started` AS `waiting_since` , `bt` . `trx_started` AS `blocker_since` , `bt` . `trx_state` AS `blocker_state` FROM `performance_schema` . `data_lock_waits` `w` LEFT JOIN `performance_schema` . `data_locks` `l` ON `w` . `REQUESTING_ENGINE_LOCK_ID` = `l` . `ENGINE_LOCK_ID` LEFT JOIN `information_schema` . `innodb_trx` `rt` ON `rt` . `trx_id` = `w` . `REQUESTING_ENGINE_TRANSACTION_ID` LEFT JOIN `information_schema` . `innodb_trx` `bt` ON `bt` . `trx_id` = `w` . `BLOCKING_ENGINE_TRANSACTION_ID`",
+              "executions": 2,
+              "total_seconds": "0.0048",
+              "rows_examined": 0,
+              "rows_sent": 0
+            },
+            {
+              "digest": "SELECT `DIGEST_TEXT` AS `digest` , `COUNT_STAR` AS `executions` , `ROUND` ( `SUM_TIMER_WAIT` / ?, ... ) AS `total_seconds` , `SUM_ROWS_EXAMINED` AS `rows_examined` , `SUM_ROWS_SENT` AS `rows_sent` FROM `performance_schema` . `events_statements_summary_by_digest` WHERE SCHEMA_NAME = ? AND `DIGEST_TEXT` IS NOT NULL ORDER BY `SUM_TIMER_WAIT` DESC LIMIT ?",
+              "executions": 1,
+              "total_seconds": "0.0036",
+              "rows_examined": 12,
+              "rows_sent": 6
+            },
+            {
+              "digest": "SELECT TABLE_NAME AS TABLE_NAME , `INDEX_NAME` AS `index_name` , COLUMN_NAME AS COLUMN_NAME FROM `information_schema` . `statistics` WHERE `TABLE_SCHEMA` = ?",
+              "executions": 1,
+              "total_seconds": "0.0024",
+              "rows_examined": 27,
+              "rows_sent": 3
+            },
+            {
+              "digest": "SHOW INDEX FROM `orders`",
+              "executions": 1,
+              "total_seconds": "0.0014",
+              "rows_examined": 20,
+              "rows_sent": 2
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E5",
+          "source": "mysql.indexes",
+          "collected_at": "2026-11-07T16:34:33.515696+00:00",
+          "value": [
+            {
+              "table_name": "accounts",
+              "index_name": "PRIMARY",
+              "column_name": "id"
+            },
+            {
+              "table_name": "orders",
+              "index_name": "lab_customer_idx",
+              "column_name": "customer_id"
+            },
+            {
+              "table_name": "orders",
+              "index_name": "PRIMARY",
+              "column_name": "id"
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E6",
+          "source": "linux.host",
+          "collected_at": "2026-11-07T16:34:39.682315+00:00",
+          "value": "0.00 0.00 0.00 2/230 1751\nMemTotal:        3734344 kB\nMemFree:         2507232 kB\nMemAvailable:    1020660 kB\nBuffers:            2124 kB\nCached:           180960 kB\n/dev/mapper/ol-root    18552832 2719172  15833660      15% /\n",
+          "mode": "live"
+        }
+      ],
+      "errors": []
+    }
+  },
+  "ssh_readiness_retry_required": true,
+  "observed_outage_snapshot": {
+    "id": "ec2ec7bc-8be3-4790-bcd4-8d6ec6047a66",
+    "kind": "snapshot",
+    "timestamp": "2026-11-07T16:33:11.321782+00:00",
+    "data": {
+      "status": "unavailable",
+      "evidence": [],
+      "errors": [
+        {
+          "source": "mysql.connection",
+          "error": "TimeoutError"
+        },
+        {
+          "source": "linux.host",
+          "error": "TimeoutError"
+        }
+      ]
+    }
+  }
+}

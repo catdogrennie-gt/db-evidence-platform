@@ -1,0 +1,33 @@
+面试演示与讲解稿（复演熟悉后使用）
+
+约90秒项目介绍
+我围绕MySQL排障做了一个个人实验工作台，重点是把“发现现象、补充证据、解释判断、验证清理”连起来。传统程序负责稳定采集和执行，AI负责根据问题选择还需要哪些只读证据，并引用实际证据回答。
+我选择了事务阻塞和缺失索引两个可复现案例。实验会保持真实故障，让DeepSeek选择锁关系、表结构或固定查询EXPLAIN等受限工具；随后由程序回滚测试事务或重建实验索引，并独立检查余额、等待和执行计划。
+模型没有数据库凭据、写SQL或Shell入口。工具有参数白名单、调用预算、重复拒绝和审计，回答引用不存在的证据会被拒绝。我还做了健康、缺证据和受控模型超时测试，验证模型失败时实验仍会进入清理。
+这是一套个人MySQL8.4实验原型，使用3万行合成订单数据。它证明了流程可实现和证据可追溯，没有用小样本声称生产准确率或提效比例。
+
+现场5—10分钟顺序
+1. 总览：实例、最新采集时间、证据来源。解释采集正常不等于业务健康，累计SQL不是当前执行语句。
+2. 索引完整案例：点按钮、确认实验范围，观察AI补查describe_table和explain_order_lookup；结果ALL→ref，清理后lab_customer_idx存在。EXPLAIN行数是估计值，15次客户端循环耗时含网络，不能直接外推生产收益。
+3. 锁完整案例：说明初始锁关系被明确标为缺失，这是为了评估补证能力，完整真值仍保留。模型补采等待双方及锁模式。两事务回滚后余额不变、等待清零。
+4. 打开对应报告：看证据ID、时间、工具参数、原始结果。当前快照与历史报告分别呈现，不用最新状态冒充故障当时状态。
+5. 负向测试：本地函数替身模拟模型超时，真实数据库故障仍被清理。原始诊断状态failed与“负向测试符合预期”是不同层次的记录。
+6. 结束时说明边界：单机、固定工具、无生产接入；多用户认证、凭据管理、任务恢复、监控日志适配仍需工程化。
+
+值得解释的设计选择
+只开放命名的只读工具，因为模型不能自行决定数据库权限和变更范围。MySQL权限层另有只读约束，程序做参数与目标UUID检查。
+不为了使用工具而强制调用。证据已经足够时允许直接回答；锁评估中明确扣留一类来源，是受控测试，不能冒充真实监控从未采到。
+判断模型完成、故障证据捕获、清理成功三件事分别记录。引用存在只是结构性检查，DBA仍要核实推理。
+保留真实错误：曾有回答建议用SUM_LOCK_TIME算行锁等待占比；核查官方定义后发现它是表锁统计，原始回答保留，增加约束与TRX_WAIT_STARTED。这个例子能说明为何AI不能自己宣布诊断正确。
+采集程序自己的SQL曾挤占业务默认库摘要。新采集连接不选业务默认库，历史已知采集模板精确单列并保留，不清空历史，也不声称按账号归因。
+数据库与宿主时钟有偏差，记录数据库时间/时区和采集UTC，未经校准不跨时钟计算等待时长。
+
+开发过程的真实表述
+这是使用AI辅助设计和编码的个人项目。用户提出数据库运维场景、求职目标和“稳定工具执行、AI关联证据”的原则；实现与测试借助Codex完成。面试前需要本人复演、阅读关键代码并能解释边界，不能说所有代码均为独立手写或已在现任公司生产上线。
+开发助手与系统运行时AI分开：运行时DeepSeek确实根据现场证据请求工具，再接收结果形成报告；不只是开发时让AI生成代码。
+
+English introduction
+I built a personal MySQL diagnosis workbench that connects deterministic evidence collection with bounded AI-assisted investigation. The model can request four allowlisted read-only tools and must cite observed evidence. In reproducible lock-contention and missing-index cases, faults remain active during evidence collection, while cleanup and acceptance checks are handled by fixed code. I also tested healthy and insufficient-evidence controls, concurrent-operation rejection, and cleanup after an injected model timeout. This is a local prototype using synthetic data, not a production deployment or an accuracy benchmark.
+
+共同复演时需要补的内容
+核对实际任职与项目日期，把个人实践放在合适位置；确认本人能从入口追到连接、工具校验、证据记录和finally清理。外部发布与所有邮件由本人决定并执行。

@@ -1,0 +1,959 @@
+{
+  "mode": "live_http_service",
+  "started_at": "2026-11-07T17:34:17.329898+00:00",
+  "collection": {
+    "id": "aebcf209-4409-49af-bc27-ca48d8a83c10",
+    "kind": "snapshot",
+    "timestamp": "2026-11-07T17:34:29.052024+00:00",
+    "data": {
+      "status": "complete",
+      "evidence": [
+        {
+          "id": "E1",
+          "source": "mysql.identity",
+          "collected_at": "2026-11-07T17:34:22.873683+00:00",
+          "value": [
+            {
+              "uuid": "cc6b496a-dac5-11f1-bcb8-000c292bd467",
+              "version": "8.4.5",
+              "port": 3307,
+              "hostname": "localhost.localdomain"
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E2",
+          "source": "mysql.status",
+          "collected_at": "2026-11-07T17:34:22.876691+00:00",
+          "value": [
+            {
+              "Variable_name": "Innodb_buffer_pool_read_requests",
+              "Value": "60085"
+            },
+            {
+              "Variable_name": "Innodb_buffer_pool_reads",
+              "Value": "1167"
+            },
+            {
+              "Variable_name": "Innodb_row_lock_current_waits",
+              "Value": "0"
+            },
+            {
+              "Variable_name": "Questions",
+              "Value": "1766"
+            },
+            {
+              "Variable_name": "Slow_queries",
+              "Value": "9"
+            },
+            {
+              "Variable_name": "Threads_connected",
+              "Value": "1"
+            },
+            {
+              "Variable_name": "Threads_running",
+              "Value": "2"
+            },
+            {
+              "Variable_name": "Uptime",
+              "Value": "3638"
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E3",
+          "source": "mysql.lock_waits",
+          "collected_at": "2026-11-07T17:34:22.879814+00:00",
+          "value": [],
+          "mode": "live"
+        },
+        {
+          "id": "E4",
+          "source": "mysql.sql_digest",
+          "collected_at": "2026-11-07T17:34:22.881415+00:00",
+          "value": [
+            {
+              "digest": "UPDATE `accounts` SET `balance` = `balance` + ? WHERE `id` = ?",
+              "executions": 16,
+              "total_seconds": 203.7742,
+              "rows_examined": 16,
+              "rows_sent": 0
+            },
+            {
+              "digest": "ALTER TABLE `orders` ADD INDEX `lab_customer_idx` ( `customer_id` )",
+              "executions": 8,
+              "total_seconds": 0.3397,
+              "rows_examined": 0,
+              "rows_sent": 0
+            },
+            {
+              "digest": "SELECT `DIGEST_TEXT` AS `digest` , `COUNT_STAR` AS `executions` , `ROUND` ( `SUM_TIMER_WAIT` / ?, ... ) AS `total_seconds` , `SUM_ROWS_EXAMINED` AS `rows_examined` , `SUM_ROWS_SENT` AS `rows_sent` FROM `performance_schema` . `events_statements_summary_by_digest` WHERE SCHEMA_NAME = ? AND `DIGEST_TEXT` IS NOT NULL ORDER BY `SUM_TIMER_WAIT` DESC LIMIT ?",
+              "executions": 142,
+              "total_seconds": 0.1666,
+              "rows_examined": 6714,
+              "rows_sent": 1134
+            },
+            {
+              "digest": "SELECT TABLE_NAME AS TABLE_NAME , `INDEX_NAME` AS `index_name` , COLUMN_NAME AS COLUMN_NAME FROM `information_schema` . `statistics` WHERE `TABLE_SCHEMA` = ?",
+              "executions": 142,
+              "total_seconds": 0.1642,
+              "rows_examined": 3759,
+              "rows_sent": 411
+            },
+            {
+              "digest": "SELECT * FROM `orders` WHERE `customer_id` = ?",
+              "executions": 60,
+              "total_seconds": 0.1421,
+              "rows_examined": 900300,
+              "rows_sent": 600
+            },
+            {
+              "digest": "SHOW GLOBAL STATUS WHERE `Variable_name` IN (...)",
+              "executions": 144,
+              "total_seconds": 0.1207,
+              "rows_examined": 1151,
+              "rows_sent": 1151
+            },
+            {
+              "digest": "SELECT SQL_NO_CACHE * FROM `orders`",
+              "executions": 6,
+              "total_seconds": 0.1089,
+              "rows_examined": 180000,
+              "rows_sent": 180000
+            },
+            {
+              "digest": "SELECT `w` . `REQUESTING_ENGINE_TRANSACTION_ID` AS `waiting_trx` , `w` . `BLOCKING_ENGINE_TRANSACTION_ID` AS `blocking_trx` , `w` . `REQUESTING_THREAD_ID` AS `waiting_thread` , `w` . `BLOCKING_THREAD_ID` AS `blocking_thread` , `l` . `OBJECT_SCHEMA` AS `db_name` , `l` . `OBJECT_NAME` AS TABLE_NAME , `l` . `INDEX_NAME` AS `index_name` , `l` . `LOCK_MODE` AS `waiting_lock_mode` , `l` . `LOCK_TYPE` AS `waiting_lock_type` , `rt` . `trx_query` AS `waiting_query` , `rt` . `trx_started` AS `waiting_since` , `bt` . `trx_started` AS `blocker_since` , `bt` . `trx_state` AS `blocker_state` FROM `performance_schema` . `data_lock_waits` `w` LEFT JOIN `performance_schema` . `data_locks` `l` ON `w` . `REQUESTING_ENGINE_LOCK_ID` = `l` . `ENGINE_LOCK_ID` LEFT JOIN `information_schema` . `innodb_trx` `rt` ON `rt` . `trx_id` = `w` . `REQUESTING_ENGINE_TRANSACTION_ID` LEFT JOIN `information_schema` . `innodb_trx` `bt` ON `bt` . `trx_id` = `w` . `BLOCKING_ENGINE_TRANSACTION_ID`",
+              "executions": 143,
+              "total_seconds": 0.0964,
+              "rows_examined": 84,
+              "rows_sent": 14
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E5",
+          "source": "mysql.indexes",
+          "collected_at": "2026-11-07T17:34:22.882417+00:00",
+          "value": [
+            {
+              "table_name": "accounts",
+              "index_name": "PRIMARY",
+              "column_name": "id"
+            },
+            {
+              "table_name": "orders",
+              "index_name": "lab_customer_idx",
+              "column_name": "customer_id"
+            },
+            {
+              "table_name": "orders",
+              "index_name": "PRIMARY",
+              "column_name": "id"
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E6",
+          "source": "linux.host",
+          "collected_at": "2026-11-07T17:34:29.051023+00:00",
+          "value": "0.03 0.04 0.00 1/228 4371\nMemTotal:        3734344 kB\nMemFree:         2297196 kB\nMemAvailable:     832312 kB\nBuffers:            2124 kB\nCached:           223604 kB\n/dev/mapper/ol-root    18552832 2731240  15821592      15% /\n",
+          "mode": "live"
+        }
+      ],
+      "errors": []
+    }
+  },
+  "index_drill": {
+    "id": "b658e373-94fb-48ba-a564-f63652774e54",
+    "kind": "drill",
+    "timestamp": "2026-11-07T17:35:06.759996+00:00",
+    "data": {
+      "scenario": "missing_index",
+      "snapshot_id": "92735299-a81b-4330-ac49-42dd7582f360",
+      "after_snapshot_id": "f0e37434-aa76-48bf-a2fa-ea3af9a72079",
+      "before_explain": [
+        {
+          "id": 1,
+          "select_type": "SIMPLE",
+          "table": "orders",
+          "partitions": null,
+          "type": "ALL",
+          "possible_keys": null,
+          "key": null,
+          "key_len": null,
+          "ref": null,
+          "rows": 30284,
+          "filtered": 10.0,
+          "Extra": "Using where"
+        }
+      ],
+      "after_explain": [
+        {
+          "id": 1,
+          "select_type": "SIMPLE",
+          "table": "orders",
+          "partitions": null,
+          "type": "ref",
+          "possible_keys": "lab_customer_idx",
+          "key": "lab_customer_idx",
+          "key_len": "4",
+          "ref": "const",
+          "rows": 10,
+          "filtered": 100.0,
+          "Extra": null
+        }
+      ],
+      "before_seconds": 0.126245,
+      "after_seconds": 0.02811,
+      "iterations": 15,
+      "clock": "perf_counter",
+      "measurement_scope": "client observed loop latency including SSH channel/network; not server-only latency"
+    }
+  },
+  "drill_before": {
+    "id": "92735299-a81b-4330-ac49-42dd7582f360",
+    "kind": "snapshot",
+    "timestamp": "2026-11-07T17:34:48.184603+00:00",
+    "data": {
+      "status": "complete",
+      "evidence": [
+        {
+          "id": "E1",
+          "source": "mysql.identity",
+          "collected_at": "2026-11-07T17:34:41.771483+00:00",
+          "value": [
+            {
+              "uuid": "cc6b496a-dac5-11f1-bcb8-000c292bd467",
+              "version": "8.4.5",
+              "port": 3307,
+              "hostname": "localhost.localdomain"
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E2",
+          "source": "mysql.status",
+          "collected_at": "2026-11-07T17:34:41.773360+00:00",
+          "value": [
+            {
+              "Variable_name": "Innodb_buffer_pool_read_requests",
+              "Value": "64294"
+            },
+            {
+              "Variable_name": "Innodb_buffer_pool_reads",
+              "Value": "1167"
+            },
+            {
+              "Variable_name": "Innodb_row_lock_current_waits",
+              "Value": "0"
+            },
+            {
+              "Variable_name": "Questions",
+              "Value": "1794"
+            },
+            {
+              "Variable_name": "Slow_queries",
+              "Value": "9"
+            },
+            {
+              "Variable_name": "Threads_connected",
+              "Value": "1"
+            },
+            {
+              "Variable_name": "Threads_running",
+              "Value": "2"
+            },
+            {
+              "Variable_name": "Uptime",
+              "Value": "3657"
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E3",
+          "source": "mysql.lock_waits",
+          "collected_at": "2026-11-07T17:34:41.780164+00:00",
+          "value": [],
+          "mode": "live"
+        },
+        {
+          "id": "E4",
+          "source": "mysql.sql_digest",
+          "collected_at": "2026-11-07T17:34:41.785343+00:00",
+          "value": [
+            {
+              "digest": "UPDATE `accounts` SET `balance` = `balance` + ? WHERE `id` = ?",
+              "executions": 16,
+              "total_seconds": "203.7742",
+              "rows_examined": 16,
+              "rows_sent": 0
+            },
+            {
+              "digest": "ALTER TABLE `orders` ADD INDEX `lab_customer_idx` ( `customer_id` )",
+              "executions": 8,
+              "total_seconds": "0.3397",
+              "rows_examined": 0,
+              "rows_sent": 0
+            },
+            {
+              "digest": "SELECT * FROM `orders` WHERE `customer_id` = ?",
+              "executions": 75,
+              "total_seconds": "0.2322",
+              "rows_examined": 1350300,
+              "rows_sent": 750
+            },
+            {
+              "digest": "SELECT `DIGEST_TEXT` AS `digest` , `COUNT_STAR` AS `executions` , `ROUND` ( `SUM_TIMER_WAIT` / ?, ... ) AS `total_seconds` , `SUM_ROWS_EXAMINED` AS `rows_examined` , `SUM_ROWS_SENT` AS `rows_sent` FROM `performance_schema` . `events_statements_summary_by_digest` WHERE SCHEMA_NAME = ? AND `DIGEST_TEXT` IS NOT NULL ORDER BY `SUM_TIMER_WAIT` DESC LIMIT ?",
+              "executions": 143,
+              "total_seconds": "0.1672",
+              "rows_examined": 6766,
+              "rows_sent": 1142
+            },
+            {
+              "digest": "SELECT TABLE_NAME AS TABLE_NAME , `INDEX_NAME` AS `index_name` , COLUMN_NAME AS COLUMN_NAME FROM `information_schema` . `statistics` WHERE `TABLE_SCHEMA` = ?",
+              "executions": 143,
+              "total_seconds": "0.1649",
+              "rows_examined": 3786,
+              "rows_sent": 414
+            },
+            {
+              "digest": "SHOW GLOBAL STATUS WHERE `Variable_name` IN (...)",
+              "executions": 145,
+              "total_seconds": "0.1251",
+              "rows_examined": 1159,
+              "rows_sent": 1159
+            },
+            {
+              "digest": "SELECT SQL_NO_CACHE * FROM `orders`",
+              "executions": 6,
+              "total_seconds": "0.1089",
+              "rows_examined": 180000,
+              "rows_sent": 180000
+            },
+            {
+              "digest": "SELECT `w` . `REQUESTING_ENGINE_TRANSACTION_ID` AS `waiting_trx` , `w` . `BLOCKING_ENGINE_TRANSACTION_ID` AS `blocking_trx` , `w` . `REQUESTING_THREAD_ID` AS `waiting_thread` , `w` . `BLOCKING_THREAD_ID` AS `blocking_thread` , `l` . `OBJECT_SCHEMA` AS `db_name` , `l` . `OBJECT_NAME` AS TABLE_NAME , `l` . `INDEX_NAME` AS `index_name` , `l` . `LOCK_MODE` AS `waiting_lock_mode` , `l` . `LOCK_TYPE` AS `waiting_lock_type` , `rt` . `trx_query` AS `waiting_query` , `rt` . `trx_started` AS `waiting_since` , `bt` . `trx_started` AS `blocker_since` , `bt` . `trx_state` AS `blocker_state` FROM `performance_schema` . `data_lock_waits` `w` LEFT JOIN `performance_schema` . `data_locks` `l` ON `w` . `REQUESTING_ENGINE_LOCK_ID` = `l` . `ENGINE_LOCK_ID` LEFT JOIN `information_schema` . `innodb_trx` `rt` ON `rt` . `trx_id` = `w` . `REQUESTING_ENGINE_TRANSACTION_ID` LEFT JOIN `information_schema` . `innodb_trx` `bt` ON `bt` . `trx_id` = `w` . `BLOCKING_ENGINE_TRANSACTION_ID`",
+              "executions": 144,
+              "total_seconds": "0.0972",
+              "rows_examined": 84,
+              "rows_sent": 14
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E5",
+          "source": "mysql.indexes",
+          "collected_at": "2026-11-07T17:34:41.794622+00:00",
+          "value": [
+            {
+              "table_name": "accounts",
+              "index_name": "PRIMARY",
+              "column_name": "id"
+            },
+            {
+              "table_name": "orders",
+              "index_name": "PRIMARY",
+              "column_name": "id"
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E6",
+          "source": "linux.host",
+          "collected_at": "2026-11-07T17:34:48.183603+00:00",
+          "value": "0.02 0.03 0.00 2/230 4391\nMemTotal:        3734344 kB\nMemFree:         2295008 kB\nMemAvailable:     830144 kB\nBuffers:            2124 kB\nCached:           223672 kB\n/dev/mapper/ol-root    18552832 2731496  15821336      15% /\n",
+          "mode": "live"
+        }
+      ],
+      "errors": []
+    }
+  },
+  "drill_after": {
+    "id": "f0e37434-aa76-48bf-a2fa-ea3af9a72079",
+    "kind": "snapshot",
+    "timestamp": "2026-11-07T17:35:06.747791+00:00",
+    "data": {
+      "status": "complete",
+      "evidence": [
+        {
+          "id": "E1",
+          "source": "mysql.identity",
+          "collected_at": "2026-11-07T17:35:00.446763+00:00",
+          "value": [
+            {
+              "uuid": "cc6b496a-dac5-11f1-bcb8-000c292bd467",
+              "version": "8.4.5",
+              "port": 3307,
+              "hostname": "localhost.localdomain"
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E2",
+          "source": "mysql.status",
+          "collected_at": "2026-11-07T17:35:00.447700+00:00",
+          "value": [
+            {
+              "Variable_name": "Innodb_buffer_pool_read_requests",
+              "Value": "66412"
+            },
+            {
+              "Variable_name": "Innodb_buffer_pool_reads",
+              "Value": "1193"
+            },
+            {
+              "Variable_name": "Innodb_row_lock_current_waits",
+              "Value": "0"
+            },
+            {
+              "Variable_name": "Questions",
+              "Value": "1828"
+            },
+            {
+              "Variable_name": "Slow_queries",
+              "Value": "10"
+            },
+            {
+              "Variable_name": "Threads_connected",
+              "Value": "1"
+            },
+            {
+              "Variable_name": "Threads_running",
+              "Value": "2"
+            },
+            {
+              "Variable_name": "Uptime",
+              "Value": "3676"
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E3",
+          "source": "mysql.lock_waits",
+          "collected_at": "2026-11-07T17:35:00.448656+00:00",
+          "value": [],
+          "mode": "live"
+        },
+        {
+          "id": "E4",
+          "source": "mysql.sql_digest",
+          "collected_at": "2026-11-07T17:35:00.450280+00:00",
+          "value": [
+            {
+              "digest": "UPDATE `accounts` SET `balance` = `balance` + ? WHERE `id` = ?",
+              "executions": 16,
+              "total_seconds": "203.7742",
+              "rows_examined": 16,
+              "rows_sent": 0
+            },
+            {
+              "digest": "ALTER TABLE `orders` ADD INDEX `lab_customer_idx` ( `customer_id` )",
+              "executions": 9,
+              "total_seconds": "0.4059",
+              "rows_examined": 0,
+              "rows_sent": 0
+            },
+            {
+              "digest": "SELECT * FROM `orders` WHERE `customer_id` = ?",
+              "executions": 90,
+              "total_seconds": "0.2386",
+              "rows_examined": 1350450,
+              "rows_sent": 900
+            },
+            {
+              "digest": "SELECT `DIGEST_TEXT` AS `digest` , `COUNT_STAR` AS `executions` , `ROUND` ( `SUM_TIMER_WAIT` / ?, ... ) AS `total_seconds` , `SUM_ROWS_EXAMINED` AS `rows_examined` , `SUM_ROWS_SENT` AS `rows_sent` FROM `performance_schema` . `events_statements_summary_by_digest` WHERE SCHEMA_NAME = ? AND `DIGEST_TEXT` IS NOT NULL ORDER BY `SUM_TIMER_WAIT` DESC LIMIT ?",
+              "executions": 145,
+              "total_seconds": "0.1732",
+              "rows_examined": 6870,
+              "rows_sent": 1158
+            },
+            {
+              "digest": "SELECT TABLE_NAME AS TABLE_NAME , `INDEX_NAME` AS `index_name` , COLUMN_NAME AS COLUMN_NAME FROM `information_schema` . `statistics` WHERE `TABLE_SCHEMA` = ?",
+              "executions": 145,
+              "total_seconds": "0.1713",
+              "rows_examined": 3830,
+              "rows_sent": 418
+            },
+            {
+              "digest": "SHOW GLOBAL STATUS WHERE `Variable_name` IN (...)",
+              "executions": 147,
+              "total_seconds": "0.1264",
+              "rows_examined": 1175,
+              "rows_sent": 1175
+            },
+            {
+              "digest": "SELECT SQL_NO_CACHE * FROM `orders`",
+              "executions": 6,
+              "total_seconds": "0.1089",
+              "rows_examined": 180000,
+              "rows_sent": 180000
+            },
+            {
+              "digest": "SELECT `w` . `REQUESTING_ENGINE_TRANSACTION_ID` AS `waiting_trx` , `w` . `BLOCKING_ENGINE_TRANSACTION_ID` AS `blocking_trx` , `w` . `REQUESTING_THREAD_ID` AS `waiting_thread` , `w` . `BLOCKING_THREAD_ID` AS `blocking_thread` , `l` . `OBJECT_SCHEMA` AS `db_name` , `l` . `OBJECT_NAME` AS TABLE_NAME , `l` . `INDEX_NAME` AS `index_name` , `l` . `LOCK_MODE` AS `waiting_lock_mode` , `l` . `LOCK_TYPE` AS `waiting_lock_type` , `rt` . `trx_query` AS `waiting_query` , `rt` . `trx_started` AS `waiting_since` , `bt` . `trx_started` AS `blocker_since` , `bt` . `trx_state` AS `blocker_state` FROM `performance_schema` . `data_lock_waits` `w` LEFT JOIN `performance_schema` . `data_locks` `l` ON `w` . `REQUESTING_ENGINE_LOCK_ID` = `l` . `ENGINE_LOCK_ID` LEFT JOIN `information_schema` . `innodb_trx` `rt` ON `rt` . `trx_id` = `w` . `REQUESTING_ENGINE_TRANSACTION_ID` LEFT JOIN `information_schema` . `innodb_trx` `bt` ON `bt` . `trx_id` = `w` . `BLOCKING_ENGINE_TRANSACTION_ID`",
+              "executions": 146,
+              "total_seconds": "0.0985",
+              "rows_examined": 84,
+              "rows_sent": 14
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E5",
+          "source": "mysql.indexes",
+          "collected_at": "2026-11-07T17:35:00.452836+00:00",
+          "value": [
+            {
+              "table_name": "accounts",
+              "index_name": "PRIMARY",
+              "column_name": "id"
+            },
+            {
+              "table_name": "orders",
+              "index_name": "lab_customer_idx",
+              "column_name": "customer_id"
+            },
+            {
+              "table_name": "orders",
+              "index_name": "PRIMARY",
+              "column_name": "id"
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E6",
+          "source": "linux.host",
+          "collected_at": "2026-11-07T17:35:06.747791+00:00",
+          "value": "0.01 0.03 0.00 1/228 4429\nMemTotal:        3734344 kB\nMemFree:         2296876 kB\nMemAvailable:     832036 kB\nBuffers:            2124 kB\nCached:           223716 kB\n/dev/mapper/ol-root    18552832 2731460  15821372      15% /\n",
+          "mode": "live"
+        }
+      ],
+      "errors": []
+    }
+  },
+  "investigation": {
+    "id": "bbe43c80-aec7-473a-9443-41978bf4587d",
+    "kind": "investigation",
+    "timestamp": "2026-11-07T17:35:37.798208+00:00",
+    "data": {
+      "mode": "live_model",
+      "model": "deepseek-flash",
+      "question": "请读取orders表结构和固定customer_id=1234查询的EXPLAIN，并检查锁等待关系。仅确认本次采样的事实，未知直接说未知，不猜测变更原因。",
+      "snapshot_id": "f0e37434-aa76-48bf-a2fa-ea3af9a72079",
+      "started_at": "2026-11-07T17:35:06.853243+00:00",
+      "tool_calls": [
+        {
+          "id": "5f7f7ce6-4454-4330-9551-6ec440207d4f",
+          "kind": "tool_call",
+          "timestamp": "2026-11-07T17:35:15.548588+00:00",
+          "data": {
+            "name": "describe_table",
+            "started_at": "2026-11-07T17:35:09.304620+00:00",
+            "arguments": {
+              "table": "orders"
+            },
+            "status": "complete",
+            "evidence_id": "E7",
+            "elapsed_seconds": 6.25
+          }
+        },
+        {
+          "id": "db7f3790-d5a6-482f-b25d-4e0e5732c4f8",
+          "kind": "tool_call",
+          "timestamp": "2026-11-07T17:35:21.869122+00:00",
+          "data": {
+            "name": "explain_order_lookup",
+            "started_at": "2026-11-07T17:35:15.555677+00:00",
+            "arguments": {},
+            "status": "complete",
+            "evidence_id": "E8",
+            "elapsed_seconds": 6.312
+          }
+        },
+        {
+          "id": "d07def0b-54f0-4ff2-a18d-eefd2d824d0c",
+          "kind": "tool_call",
+          "timestamp": "2026-11-07T17:35:28.105962+00:00",
+          "data": {
+            "name": "get_lock_waits",
+            "started_at": "2026-11-07T17:35:21.879818+00:00",
+            "arguments": {},
+            "status": "complete",
+            "evidence_id": "E9",
+            "elapsed_seconds": 6.219
+          }
+        }
+      ],
+      "usage": [
+        {
+          "prompt_tokens": 2511,
+          "completion_tokens": 67,
+          "total_tokens": 2578,
+          "prompt_tokens_details": {
+            "cached_tokens": 640
+          },
+          "prompt_cache_hit_tokens": 640,
+          "prompt_cache_miss_tokens": 1871
+        },
+        {
+          "prompt_tokens": 3287,
+          "completion_tokens": 1257,
+          "total_tokens": 4544,
+          "prompt_tokens_details": {
+            "cached_tokens": 2560
+          },
+          "prompt_cache_hit_tokens": 2560,
+          "prompt_cache_miss_tokens": 727
+        }
+      ],
+      "budget": {
+        "max_rounds": 4,
+        "max_calls": 6,
+        "seconds": 180
+      },
+      "status": "complete",
+      "answer": {
+        "summary": "本次采样（2026-11-07T17:35 UTC，实例 cc6b496a…，MySQL 8.4.5，端口 3307）显示：orders 表结构为 id(主键)、customer_id(建有 lab_customer_idx 非唯一二级索引)、amount、note；固定查询 SELECT * FROM orders WHERE customer_id=? 的 EXPLAIN 使用 ref 访问、key=lab_customer_idx、key_len=4、ref=const、预估 rows=10。两次锁等待采样（初始快照 E3 与后续复查 E9）均为空，且初始状态计数器 Innodb_row_lock_current_waits=0，因此本次采样未观察到锁等待关系。未知：历史上/采样间隙是否存在锁等待、SQL 摘要中 ALTER TABLE 的执行背景、CPU/IO 历史趋势等均无法由本次证据确定。",
+        "findings": [
+          {
+            "title": "orders 表结构与索引：customer_id 上有可见非唯一二级索引",
+            "evidence_ids": [
+              "E7",
+              "E5"
+            ],
+            "reasoning": "describe_table 显示 4 列：id int NOT NULL 主键、customer_id int NOT NULL（Key=MUL）、amount int NOT NULL、note varchar(100) NULL；索引为 PRIMARY(id, BTREE, 基数 30284) 与 lab_customer_idx(customer_id, 非唯一, BTREE, 基数 3000, Visible=YES)。E5 的索引清单一致。未观察到其他索引。",
+            "next_readonly_check": "无需重复；如后续需确认索引统计新鲜度，可只读查询 information_schema.STATISTICS 的 CARDINALITY 与 information_schema.TABLES 的 UPDATE_TIME（不做 ANALYZE）"
+          },
+          {
+            "title": "固定查询 EXPLAIN：命中 lab_customer_idx 的 ref 访问，预估 10 行",
+            "evidence_ids": [
+              "E8",
+              "E7"
+            ],
+            "reasoning": "EXPLAIN 对 SELECT SQL_NO_CACHE * FROM orders WHERE customer_id=1234 返回 type=ref、possible_keys=lab_customer_idx、key=lab_customer_idx、key_len=4、ref=const、rows=10、filtered=100.0、无 Extra 说明。这与 E7 中 customer_id 的单一列索引结构一致。注意：EXPLAIN 为不执行语句的估算，且仅适用于该实验模板查询，不能外推到其他 SQL 的实际执行代价。",
+            "next_readonly_check": "如需执行计划稳定性证据，可只读查询 performance_schema.events_statements_summary_by_digest 中该 SELECT digest 的 SUM_NO_INDEX_USED / SUM_ROWS_EXAMINED 变化"
+          },
+          {
+            "title": "本次采样未观察到锁等待关系",
+            "evidence_ids": [
+              "E3",
+              "E9",
+              "E2"
+            ],
+            "reasoning": "初始快照 mysql.lock_waits 返回空数组（E3），状态计数 Innodb_row_lock_current_waits=0（E2）；后续 get_lock_waits 复查同样返回空（E9，采集时间晚于初始快照约 28 秒）。三者一致地表明采样时刻无锁等待。但这是离散采样：两次采样点都为空不能证明整个区间内持续无等待，也不能反映历史上是否曾出现锁等待。",
+            "next_readonly_check": "如需历史证据，可只读查询 performance_schema.events_statements_summary_by_digest 与 information_schema.INNODB_TRX 当前快照（不改配置、不写数据）"
+          },
+          {
+            "title": "SQL 摘要中存在大事务开销的 accounts UPDATE 与 orders 索引变更记录，但背景未知",
+            "evidence_ids": [
+              "E4"
+            ],
+            "reasoning": "digest 累计统计显示：UPDATE accounts SET balance=balance+? WHERE id=? 执行 16 次、累计 203.7742 秒（每行检查 16 行、发送 0 行）；ALTER TABLE orders ADD INDEX lab_customer_idx 执行 9 次、累计 0.4059 秒；SELECT * FROM orders WHERE customer_id=? 执行 90 次、累计 0.2386 秒、rows_examined 1,350,450（平均每次约 15,005 行）。这些是从实例启动起（Uptime=3676 秒）的累计值，无法确定各次执行的时间点，也不能与当前或历史锁等待建立因果关系；ALTER 是否被事务回滚、变更由谁触发均无证据。",
+            "next_readonly_check": "如需时间维度证据，可只读查询 performance_schema.events_statements_summary_by_digest 的 FIRST_SEEN/LAST_SEEN 列"
+          }
+        ],
+        "unknowns": [
+          "采样间隙（E3 与 E9 之间约 28 秒，以及实例启动至今）是否存在过锁等待，无法确定",
+          "E4 中 UPDATE accounts 累计 203.77 秒高耗时的具体时间分布与成因未知，不能归因于锁等待或特定事务",
+          "E4 中 ALTER TABLE orders ADD INDEX 记录（9 次执行）的实际变更历史、是否中途失败、是否与任何等待有关，均无证据",
+          "E4 中 SELECT * FROM orders WHERE customer_id=? 平均检查约 1.5 万行，与该查询当前 EXPLAIN 预估 10 行不一致，其原因（如历史执行时索引尚不存在）仅为假设，未验证",
+          "CPU/IO 的历史使用情况未知；单次快照（loadavg 0.01 0.03 0.00，MemAvailable 约 832 MB）不能推断趋势",
+          "慢查询 10 次（Slow_queries=10）对应的具体语句与耗时未知"
+        ]
+      },
+      "evidence_snapshot_id": "3121a4b5-fcf3-434a-bf86-e6498dc2b917",
+      "elapsed_seconds": 30.953,
+      "finished_at": "2026-11-07T17:35:37.798208+00:00"
+    }
+  },
+  "investigation_evidence": {
+    "id": "3121a4b5-fcf3-434a-bf86-e6498dc2b917",
+    "kind": "snapshot",
+    "timestamp": "2026-11-07T17:35:37.788940+00:00",
+    "data": {
+      "purpose": "investigation",
+      "status": "complete",
+      "evidence": [
+        {
+          "id": "E1",
+          "source": "mysql.identity",
+          "collected_at": "2026-11-07T17:35:00.446763+00:00",
+          "value": [
+            {
+              "uuid": "cc6b496a-dac5-11f1-bcb8-000c292bd467",
+              "version": "8.4.5",
+              "port": 3307,
+              "hostname": "localhost.localdomain"
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E2",
+          "source": "mysql.status",
+          "collected_at": "2026-11-07T17:35:00.447700+00:00",
+          "value": [
+            {
+              "Variable_name": "Innodb_buffer_pool_read_requests",
+              "Value": "66412"
+            },
+            {
+              "Variable_name": "Innodb_buffer_pool_reads",
+              "Value": "1193"
+            },
+            {
+              "Variable_name": "Innodb_row_lock_current_waits",
+              "Value": "0"
+            },
+            {
+              "Variable_name": "Questions",
+              "Value": "1828"
+            },
+            {
+              "Variable_name": "Slow_queries",
+              "Value": "10"
+            },
+            {
+              "Variable_name": "Threads_connected",
+              "Value": "1"
+            },
+            {
+              "Variable_name": "Threads_running",
+              "Value": "2"
+            },
+            {
+              "Variable_name": "Uptime",
+              "Value": "3676"
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E3",
+          "source": "mysql.lock_waits",
+          "collected_at": "2026-11-07T17:35:00.448656+00:00",
+          "value": [],
+          "mode": "live"
+        },
+        {
+          "id": "E4",
+          "source": "mysql.sql_digest",
+          "collected_at": "2026-11-07T17:35:00.450280+00:00",
+          "value": [
+            {
+              "digest": "UPDATE `accounts` SET `balance` = `balance` + ? WHERE `id` = ?",
+              "executions": 16,
+              "total_seconds": "203.7742",
+              "rows_examined": 16,
+              "rows_sent": 0
+            },
+            {
+              "digest": "ALTER TABLE `orders` ADD INDEX `lab_customer_idx` ( `customer_id` )",
+              "executions": 9,
+              "total_seconds": "0.4059",
+              "rows_examined": 0,
+              "rows_sent": 0
+            },
+            {
+              "digest": "SELECT * FROM `orders` WHERE `customer_id` = ?",
+              "executions": 90,
+              "total_seconds": "0.2386",
+              "rows_examined": 1350450,
+              "rows_sent": 900
+            },
+            {
+              "digest": "SELECT `DIGEST_TEXT` AS `digest` , `COUNT_STAR` AS `executions` , `ROUND` ( `SUM_TIMER_WAIT` / ?, ... ) AS `total_seconds` , `SUM_ROWS_EXAMINED` AS `rows_examined` , `SUM_ROWS_SENT` AS `rows_sent` FROM `performance_schema` . `events_statements_summary_by_digest` WHERE SCHEMA_NAME = ? AND `DIGEST_TEXT` IS NOT NULL ORDER BY `SUM_TIMER_WAIT` DESC LIMIT ?",
+              "executions": 145,
+              "total_seconds": "0.1732",
+              "rows_examined": 6870,
+              "rows_sent": 1158
+            },
+            {
+              "digest": "SELECT TABLE_NAME AS TABLE_NAME , `INDEX_NAME` AS `index_name` , COLUMN_NAME AS COLUMN_NAME FROM `information_schema` . `statistics` WHERE `TABLE_SCHEMA` = ?",
+              "executions": 145,
+              "total_seconds": "0.1713",
+              "rows_examined": 3830,
+              "rows_sent": 418
+            },
+            {
+              "digest": "SHOW GLOBAL STATUS WHERE `Variable_name` IN (...)",
+              "executions": 147,
+              "total_seconds": "0.1264",
+              "rows_examined": 1175,
+              "rows_sent": 1175
+            },
+            {
+              "digest": "SELECT SQL_NO_CACHE * FROM `orders`",
+              "executions": 6,
+              "total_seconds": "0.1089",
+              "rows_examined": 180000,
+              "rows_sent": 180000
+            },
+            {
+              "digest": "SELECT `w` . `REQUESTING_ENGINE_TRANSACTION_ID` AS `waiting_trx` , `w` . `BLOCKING_ENGINE_TRANSACTION_ID` AS `blocking_trx` , `w` . `REQUESTING_THREAD_ID` AS `waiting_thread` , `w` . `BLOCKING_THREAD_ID` AS `blocking_thread` , `l` . `OBJECT_SCHEMA` AS `db_name` , `l` . `OBJECT_NAME` AS TABLE_NAME , `l` . `INDEX_NAME` AS `index_name` , `l` . `LOCK_MODE` AS `waiting_lock_mode` , `l` . `LOCK_TYPE` AS `waiting_lock_type` , `rt` . `trx_query` AS `waiting_query` , `rt` . `trx_started` AS `waiting_since` , `bt` . `trx_started` AS `blocker_since` , `bt` . `trx_state` AS `blocker_state` FROM `performance_schema` . `data_lock_waits` `w` LEFT JOIN `performance_schema` . `data_locks` `l` ON `w` . `REQUESTING_ENGINE_LOCK_ID` = `l` . `ENGINE_LOCK_ID` LEFT JOIN `information_schema` . `innodb_trx` `rt` ON `rt` . `trx_id` = `w` . `REQUESTING_ENGINE_TRANSACTION_ID` LEFT JOIN `information_schema` . `innodb_trx` `bt` ON `bt` . `trx_id` = `w` . `BLOCKING_ENGINE_TRANSACTION_ID`",
+              "executions": 146,
+              "total_seconds": "0.0985",
+              "rows_examined": 84,
+              "rows_sent": 14
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E5",
+          "source": "mysql.indexes",
+          "collected_at": "2026-11-07T17:35:00.452836+00:00",
+          "value": [
+            {
+              "table_name": "accounts",
+              "index_name": "PRIMARY",
+              "column_name": "id"
+            },
+            {
+              "table_name": "orders",
+              "index_name": "lab_customer_idx",
+              "column_name": "customer_id"
+            },
+            {
+              "table_name": "orders",
+              "index_name": "PRIMARY",
+              "column_name": "id"
+            }
+          ],
+          "mode": "live"
+        },
+        {
+          "id": "E6",
+          "source": "linux.host",
+          "collected_at": "2026-11-07T17:35:06.747791+00:00",
+          "value": "0.01 0.03 0.00 1/228 4429\nMemTotal:        3734344 kB\nMemFree:         2296876 kB\nMemAvailable:     832036 kB\nBuffers:            2124 kB\nCached:           223716 kB\n/dev/mapper/ol-root    18552832 2731460  15821372      15% /\n",
+          "mode": "live"
+        },
+        {
+          "source": "mysql.tool.describe_table",
+          "instance_uuid": "cc6b496a-dac5-11f1-bcb8-000c292bd467",
+          "collected_at": "2026-11-07T17:35:15.548588+00:00",
+          "mode": "live",
+          "value": {
+            "columns": [
+              {
+                "Field": "id",
+                "Type": "int",
+                "Null": "NO",
+                "Key": "PRI",
+                "Default": null,
+                "Extra": ""
+              },
+              {
+                "Field": "customer_id",
+                "Type": "int",
+                "Null": "NO",
+                "Key": "MUL",
+                "Default": null,
+                "Extra": ""
+              },
+              {
+                "Field": "amount",
+                "Type": "int",
+                "Null": "NO",
+                "Key": "",
+                "Default": null,
+                "Extra": ""
+              },
+              {
+                "Field": "note",
+                "Type": "varchar(100)",
+                "Null": "YES",
+                "Key": "",
+                "Default": null,
+                "Extra": ""
+              }
+            ],
+            "indexes": [
+              {
+                "Table": "orders",
+                "Non_unique": 0,
+                "Key_name": "PRIMARY",
+                "Seq_in_index": 1,
+                "Column_name": "id",
+                "Collation": "A",
+                "Cardinality": 30284,
+                "Sub_part": null,
+                "Packed": null,
+                "Null": "",
+                "Index_type": "BTREE",
+                "Comment": "",
+                "Index_comment": "",
+                "Visible": "YES",
+                "Expression": null
+              },
+              {
+                "Table": "orders",
+                "Non_unique": 1,
+                "Key_name": "lab_customer_idx",
+                "Seq_in_index": 1,
+                "Column_name": "customer_id",
+                "Collation": "A",
+                "Cardinality": 3000,
+                "Sub_part": null,
+                "Packed": null,
+                "Null": "",
+                "Index_type": "BTREE",
+                "Comment": "",
+                "Index_comment": "",
+                "Visible": "YES",
+                "Expression": null
+              }
+            ]
+          },
+          "id": "E7"
+        },
+        {
+          "source": "mysql.tool.explain_order_lookup",
+          "instance_uuid": "cc6b496a-dac5-11f1-bcb8-000c292bd467",
+          "collected_at": "2026-11-07T17:35:21.869122+00:00",
+          "mode": "live",
+          "value": [
+            {
+              "id": 1,
+              "select_type": "SIMPLE",
+              "table": "orders",
+              "partitions": null,
+              "type": "ref",
+              "possible_keys": "lab_customer_idx",
+              "key": "lab_customer_idx",
+              "key_len": "4",
+              "ref": "const",
+              "rows": 10,
+              "filtered": 100.0,
+              "Extra": null
+            }
+          ],
+          "id": "E8"
+        },
+        {
+          "source": "mysql.tool.get_lock_waits",
+          "instance_uuid": "cc6b496a-dac5-11f1-bcb8-000c292bd467",
+          "collected_at": "2026-11-07T17:35:28.105962+00:00",
+          "mode": "live",
+          "value": [],
+          "id": "E9"
+        }
+      ],
+      "errors": []
+    }
+  },
+  "latest_snapshot_at_finish": "2026-11-07T17:35:28.110530+00:00",
+  "status": "passed",
+  "finished_at": "2026-11-07T17:35:37.867079+00:00"
+}

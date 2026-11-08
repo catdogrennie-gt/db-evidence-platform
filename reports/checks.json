@@ -1,0 +1,13 @@
+{
+  "tested_at": "2026-11-08T01:58:20.587780+00:00",
+  "unit_tests": {
+    "tests": "26",
+    "failures": "0",
+    "errors": "0",
+    "skipped": "0",
+    "time": "1.088"
+  },
+  "javascript_syntax": "passed",
+  "startup_repeat_check": "Recognized existing project service without binding a second listener",
+  "warning": "Starlette/httpx test-client dependency deprecation warning; no failing checks."
+}

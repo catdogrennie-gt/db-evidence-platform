@@ -1,0 +1,53 @@
+MySQL AI故障诊断工作台 — 架构与数据设计 v2
+状态：当前原型设计；实现状态和限制见04-acceptance.txt、README和实测报告。
+
+组成与职责
+1. web/index.html + web/app.js：实例总览、最新证据、可选择历史诊断及对应快照、工具审计、计划前后对照和故障演练；备份入口为辅助。仅渲染脱敏数据，不存密钥，前端无需构建。
+2. app.py：本机HTTP入口、Host/Origin检查、输入校验、单写任务互斥。采集线程与AI请求隔离，模型失败不会终止采集。
+3. lab.py：现有连接、周期采集、记录库、确定性演练。随着职责增长，将新诊断编排放独立模块，不继续向同一文件堆功能。
+4. investigation.py：诊断会话、只读工具目录、预算、调用审计、累计证据和报告校验。模型选择证据工具，程序验证后执行固定查询；工具结果作为不可信数据处理。
+5. SQLite：记录快照、诊断、调用与演练；首版可复用records JSON对象，不为多用户场景提前扩展关系表。文件位于忽略提交的runtime，人工导出脱敏证据到reports。
+6. Linux VM：MySQL3307源库；3308恢复目标仅用于附属演练。数据库只绑定回环，通过已核验host key的SSH通道访问。基础Linux采集是固定命令，禁止模型拼接命令。
+7. DeepSeek：仅接收合成实验的脱敏证据与问题，返回tool_calls或结构化报告。开发代理模型与本项目运行时模型为不同用途/计费。
+8. incidents.py：仅由明确启动的实验入口编排故障完整案例。检查源UUID与基线后注入，保存故障真值与初始输入，故障保持期间调用只读诊断，finally清理，随后独立检查索引或余额/等待。诊断和清理分别记录，失败不冒充通过。
+
+通信方式
+浏览器→FastAPI：127.0.0.1:8765 HTTP/JSON；首版同步POST执行、定时GET刷新，单用户可接受，页面明确任务进行中。若实际超时影响体验，再改持久化任务+轮询，不先引入Redis/Celery。
+控制端→Linux：SSH22，RejectPolicy核验主机；通过direct-tcpip连MySQL回环3307，不对宿主网络暴露数据库端口。
+控制端→DeepSeek：HTTPS chat/completions；工具仅为命名接口，不给任意SQL函数。
+完整案例POST /api/incident/{index|lock}复用写操作互斥；GET /api/task每2秒读取阶段。进度显示为内存状态，阶段事件和最终报告入SQLite；重启不声称恢复内存任务。页面断开不会主动取消同步工作线程，程序被强杀时不能保证DDL已清理。
+模块内部：Python类型化函数与JSON可序列化记录；网络故障与模型故障分开记录。
+MCP：作为未来复用连接协议保留，本版本先验证模型函数调用与内部工具目录。协议名称不是项目成果，诊断是否正确才是。
+
+数据组织
+Record：id(UUID)、kind、timestamp(UTC)、data。
+Snapshot：purpose(可选)、status(complete/partial/unavailable)、evidence[]、errors[]。周期快照的实例身份由mysql.identity证据给出。
+Evidence：id(单次诊断唯一)、source、collected_at、mode、value；新增工具证据还包含instance_uuid。补证据ID按现有最大编号递增，兼容缺失来源的快照。工具补证据包含实际采集时间，不把不同时间的结果当作同时发生。
+Investigation：问题、初始snapshot_id、started/finished、状态、model、tool_calls[]、累计evidence_snapshot_id、answer、usage、预算与停止原因。
+ToolCall：name、校验后的arguments、时间、耗时、状态、产生的evidence_id或安全错误类型。未知工具/参数也有审计，不保存模型内部思维链。
+Finding：title、evidence_ids、reasoning、next_readonly_check；报告还含summary和unknowns。所有引用必须存在，未完成预算/工具失败明确显示。
+Drill：scenario、已知注入条件、故障中snapshot_id、动作、after_snapshot_id、执行计划/观测值。评估真值独立于模型，不让它自评正确性。
+Incident：run_id、scenario、events、fault/initial/after快照ID、investigation_id、diagnosis_status、diagnostic_evidence_confirmed、cleanup和总status。模型响应结构/引用有效、工具捕获实际故障、清理校验通过三者同时成立才标passed；这不是对模型每句推理的正确性认证。
+ModelResponse：原始content与tool_calls、每轮usage、状态和校验错误；不保存内部思维链。有效、无效最终回答和原始工具请求均保留。
+
+采集方式
+周期证据：identity/status/data_lock_waits+innodb_trx/digest/indexes、/proc与df；采集失败存错误类型。
+按需证据：仅白名单固定SELECT/SHOW/EXPLAIN。EXPLAIN仅覆盖首版实验查询模板，不能把模型输入当任意SQL；不使用会真正执行查询的EXPLAIN ANALYZE。
+SQL摘要保留累计值标签，尚未实现摘要级窗口匹配。状态计数窗口差分需同UUID、Uptime不倒退、计数不倒退和正时间间隔。缺样本/重启时不能输出伪速率。
+锁证据必须来自事务/线程关联字段；事务开始时间不同于等待开始时间。无历史数据不能声称复原已经消失的锁或死锁。
+采集与只读工具连接不选择业务默认库，表名明确限定。旧累计摘要保留，按服务器STATEMENT_DIGEST精确匹配已知采集模板单列；这是SQL模板分类，不能按账号归因。不清零计数器。最多读取耗时前64个候选并保留8个非匹配摘要，范围与被单列值均在证据中说明。
+锁查询复用同一模板，明确TRX_WAIT_STARTED与TRX_STARTED，附数据库观测时间/时区；实例证据附服务器UTC与本地时间。原始数据库时间与宿主采集UTC可能有偏差，未校准不作跨时钟减法。SUM_LOCK_TIME是表锁统计，不能当InnoDB行锁等待占比。
+
+取舍
+候选A整套D-Bot：诊断设计可参考，但现有说明基于PostgreSQL，MySQL移植成本不明，不作为今晚核心依赖。
+候选B现成MySQL MCP：有复用价值，但写能力、审计和批准门禁不能混淆，需源码与权限验证；暂不授予广泛权限。
+候选C现有Python控制端+受限工具编排：沿用已跑通环境，范围可控，便于明确个人贡献。首选，验证效果后再决定复用外部后端。
+
+失败与资源边界
+最大4轮/6调用；重复同工具同参数不重复执行。工具结果截断时标记，不能隐藏丢失信息。单工具有数据库超时，模型HTTP超时45秒；总预算在轮次边界检查，可能有单次调用超时量的超出。
+只读工具不会进行KILL、DDL、DML、SET GLOBAL；修复仅通过独立确定性演练路径，且限制注册实验UUID。
+私密配置明文保存在本机忽略目录是当前局限；上线前要凭据管理、细分SSH/DB权限、认证和任务隔离。loopback不等于完整生产安全体系。
+
+实现映射
+FR01→app采集状态+web；FR02/03/04→investigation.py+接口；FR05→lab演练+实测报告；FR06/07→错误状态+历史record；FR08→窗口差分模块；FR09→web事件视图；FR10→docs/reports；FR11→扩展接口而非虚构适配。
+FR12→incidents.py、/api/incident、/api/task、页面完整案例、tests/test_incidents.py与verify_incidents.py。

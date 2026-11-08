@@ -1,0 +1,115 @@
+{
+  "verified_at": "2026-11-08T01:49:13.229157+00:00",
+  "explain": {
+    "source": "mysql.tool.explain_order_lookup",
+    "instance_uuid": "cc6b496a-dac5-11f1-bcb8-000c292bd467",
+    "collected_at": "2026-11-08T01:49:17.780932+00:00",
+    "mode": "live",
+    "value": [
+      {
+        "id": 1,
+        "select_type": "SIMPLE",
+        "table": "orders",
+        "partitions": null,
+        "type": "ref",
+        "possible_keys": "lab_customer_idx",
+        "key": "lab_customer_idx",
+        "key_len": "4",
+        "ref": "const",
+        "rows": 10,
+        "filtered": 100.0,
+        "Extra": null
+      }
+    ],
+    "tool": {
+      "name": "explain_order_lookup",
+      "arguments": {}
+    },
+    "query_template": "EXPLAIN SELECT * FROM evidence_lab.orders WHERE customer_id=1234"
+  },
+  "table": {
+    "source": "mysql.tool.describe_table",
+    "instance_uuid": "cc6b496a-dac5-11f1-bcb8-000c292bd467",
+    "collected_at": "2026-11-08T01:49:24.040513+00:00",
+    "mode": "live",
+    "value": {
+      "columns": [
+        {
+          "Field": "id",
+          "Type": "int",
+          "Null": "NO",
+          "Key": "PRI",
+          "Default": null,
+          "Extra": ""
+        },
+        {
+          "Field": "customer_id",
+          "Type": "int",
+          "Null": "NO",
+          "Key": "MUL",
+          "Default": null,
+          "Extra": ""
+        },
+        {
+          "Field": "amount",
+          "Type": "int",
+          "Null": "NO",
+          "Key": "",
+          "Default": null,
+          "Extra": ""
+        },
+        {
+          "Field": "note",
+          "Type": "varchar(100)",
+          "Null": "YES",
+          "Key": "",
+          "Default": null,
+          "Extra": ""
+        }
+      ],
+      "indexes": [
+        {
+          "Table": "orders",
+          "Non_unique": 0,
+          "Key_name": "PRIMARY",
+          "Seq_in_index": 1,
+          "Column_name": "id",
+          "Collation": "A",
+          "Cardinality": 30284,
+          "Sub_part": null,
+          "Packed": null,
+          "Null": "",
+          "Index_type": "BTREE",
+          "Comment": "",
+          "Index_comment": "",
+          "Visible": "YES",
+          "Expression": null
+        },
+        {
+          "Table": "orders",
+          "Non_unique": 1,
+          "Key_name": "lab_customer_idx",
+          "Seq_in_index": 1,
+          "Column_name": "customer_id",
+          "Collation": "A",
+          "Cardinality": 3000,
+          "Sub_part": null,
+          "Packed": null,
+          "Null": "",
+          "Index_type": "BTREE",
+          "Comment": "",
+          "Index_comment": "",
+          "Visible": "YES",
+          "Expression": null
+        }
+      ]
+    },
+    "tool": {
+      "name": "describe_table",
+      "arguments": {
+        "table": "orders"
+      }
+    },
+    "table_scope": "evidence_lab.orders"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "ssh_host": "192.168.2.132",
+  "ssh_user": "root",
+  "ssh_password": "REPLACE_IN_IGNORED_RUNTIME_CONFIG",
+  "db_password": "REPLACE_IN_IGNORED_RUNTIME_CONFIG",
+  "source_port": 3307,
+  "restore_port": 3308,
+  "source_uuid": "REGISTER_ACTUAL_SOURCE_SERVER_UUID",
+  "restore_uuid": "REGISTER_ACTUAL_RESTORE_SERVER_UUID",
+  "key_path": "ABSOLUTE_PATH_TO_PRIVATE_DEEPSEEK_KEY",
+  "model": "deepseek-flash",
+  "vm_path": "ABSOLUTE_PATH_TO_PROVISIONED_LAB_VM"
+}

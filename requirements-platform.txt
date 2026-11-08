@@ -1,0 +1,12 @@
+# Selected direct versions; reproducible full environment in requirements-platform-lock.txt.
+fastapi==0.162.2
+uvicorn==0.54.0
+PyMySQL[rsa]==1.1.2
+httpx==0.28.1
+paramiko==5.1.0
+cryptography==50.0.2
+SQLAlchemy==2.0.57
+alembic==1.20.1
+argon2-cffi==25.1.0
+prometheus-client==0.26.0
+pytest==9.2.0
