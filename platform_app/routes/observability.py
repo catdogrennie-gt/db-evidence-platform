@@ -272,7 +272,7 @@ def topology(
     edges = []
     departments = {}
     systems = {}
-    visible_uuid = {i.expected_server_uuid: i for i in instances}
+    visible_uuid = {i.expected_server_uuid: i for i in instances if i.expected_server_uuid}
     for instance in instances:
         system = db.get(System, instance.system_id)
         department = db.get(Department, system.department_id)
@@ -624,6 +624,7 @@ def snapshot_view(
         visible = {
             i.expected_server_uuid: i
             for i in actor.db.scalars(select(Instance).where(Instance.id.in_(permitted)))
+            if i.expected_server_uuid
         }
         for item in items:
             upstream = visible.get(item.pop("source_uuid", None))

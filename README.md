@@ -1,70 +1,77 @@
 # DB Evidence Platform
 
-**从持续采集到处置复验的内部 MySQL 运维平台。**
+**让已有监控持续产出可追溯的问题分析。**
 
-Evidence-driven MySQL operations with bounded AI investigation.
+An evidence-driven MySQL inspection and investigation platform.
 
-将资产、指标、SQL 摘要、锁等待、日志和人员处置记录组织在同一工作区：先确定责任与数据范围，再围绕一个事件冻结证据、开展调查、记录人工操作，最后用新样本复验并沉淀知识。
+面向内部 DBA 与运维团队，复用 Zabbix 已有的数据库、主机与连接探针数据，自动巡检、发现异常和条件风险，把问题摘要、证据关系、指标曲线与后续检查放进同一份报告。
 
-**确定性工具负责采集、规则与验证；AI 负责证据关联和解释；重要操作由人员明确控制。**
+[操作指南](docs/user-guide.md) · [安装与运行](docs/platform/07-operations.md) · [验证范围](#验证与复现) · [历史版本](docs/releases/README.md)
 
-[安装与运行](docs/platform/07-operations.md) · [案例与演示](docs/platform/08-case-and-demo.md) · [实际验收](docs/platform/06-acceptance-status.md) · [设计文档](docs/platform/README.md)
+![问题与风险首页：授权对象、当前问题、候选风险与后台巡检状态](docs/images/intelligence-overview.jpg)
 
-这是个人工程项目，已在三个独立 MySQL 合成目标上完成核心路径验证。当前支持 MySQL；生产部署、十实例容量和高可用尚未验证。公开仓库提供源码、文档与经检查的截图，私密配置、目标凭据及原始运行证据保存在仓库外。
+本机隔离环境的实际产品界面。数据库业务负载为合成数据；对象、问题数量按当前账号的业务授权范围计算，规则结果与真实模型输出分别标识。
 
-<details>
-<summary>查看真实运行截图：工作台</summary>
+## 先看结果，再沿证据调查
 
-![工作台：授权范围内的实例、事件及逐源采集新鲜度](docs/platform/screenshots/workbench.png)
+日常打开“问题与风险”，先看**发生了什么、影响哪个对象、依据是否充分**。点击问题进入报告，核对关系图和冻结曲线，再查看原始证据或当前指标。配置一次巡检策略后，后台按周期运行；浏览器无需一直打开。
 
-2026-11-08 本地隔离实验截图。该 DBA 账号可见两个授权实例；页面计数按当前权限计算，不等于全部登记资产数。
+```text
+连接已有 Zabbix → 选择监控对象 → 启用巡检
+                                 ↓
+问题与风险 → 分析报告 → 证据关系 / 冻结曲线 → 下一步检查
+                                 ↓
+                          人工处置 → 新样本复验
+```
 
-</details>
-
-## 能做什么
-
-| 工作环节 | 当前实现 |
+| 能力 | 使用时能看到什么 |
 | --- | --- |
-| 接入与授权 | 六步 MySQL 接入向导、连接预检、UUID 去重、能力确认；本地账号、角色与实例范围授权，管理员默认没有业务证据读取权 |
-| 持续观测 | 独立 worker 采集状态、SQL 摘要、事务与锁、结构配置、复制基础状态、数据库日志和主机资料；保留来源、时间与能力缺口 |
-| 历史分析 | 指标图、SQL 时间窗差分、证据检索与拓扑；固定单表模板 EXPLAIN，不执行被解释的业务查询 |
-| 事件协作 | 版本化规则、事件确认与分派、维护窗口、站内提醒、处置计划审核及外部执行记录 |
-| AI 调查 | 显式外发策略、脱敏预览、冻结窗口、受限只读工具、调用预算、引用校验；报告区分事实、假设、反证和未知 |
-| 复验与知识 | 比较处置前后有效样本，返回 `improved`、`not_improved` 或 `inconclusive`；保存冻结清单、知识版本与审核记录 |
-| 平台运维 | 显式数据库迁移、进程启停与身份核验、worker 心跳、依赖状态、证据保留及限时导出 |
+| **自主巡检** | 轻量规则检查、周期综合分析和新异常紧急通道；显示最近完成、下次到期、预算与停止原因，正常巡检也保留历史 |
+| **三层证据关联** | 同一分析范围内的数据库、主机与连接探针资料；每条曲线带对象、来源、单位、窗口和覆盖状态 |
+| **可追溯报告** | 事实、候选解释、反证、未知和下一步检查；引用可回到对应冻结证据，旧报告不会随上游新数据改写 |
+| **复用已有监控** | 只读连接 Zabbix，发现并选择已有对象，查看实际能力；缺锁、SQL、日志或计划时直接呈现缺口 |
+| **按业务范围协作** | 后端按部门、系统、环境及实例范围控制资料；来源管理权限与业务数据读取权限分开 |
 
-采集失败、来源过期和资料不适用分别展示；缺失值保持未知。采集与模型调用分进程运行，模型故障不会占用采集队列。每次读取、工具调用和导出都在后端重新检查权限。
+确定性工具负责采集、计算与验证；AI 辅助关联和解释；重要处置由人员明确控制。
 
-## 架构
+## 一份报告，讲清依据和下一步
 
-![平台架构：统一授权 API、独立采集与 AI 进程、MySQL 控制库及 Prometheus](docs/platform/architecture.svg)
+![实际锁等待报告：对象范围、分类型证据关系与下一步检查](docs/images/intelligence-report.jpg)
 
-图为[架构设计基线](docs/platform/02-architecture.md)。图中的 Grafana / 官方 exporter 是可选适配设计，当前未集成；PostgreSQL 适配器尚未实现。
+图示为已核对的实际锁报告。该历史报告未保留曲线：8 条来源曲线合计 10,116 点，触发当前 10,000 点预算后被整组省略。此缺口保留显示；较小窗口的冻结曲线及下方当前指标看板可用，不能拿新查询补写旧报告。
 
-- **React / TypeScript + Ant Design / ECharts**：同源工作区、图表与流程页面。
-- **FastAPI + 独立 MySQL 控制库**：身份、资产、任务、结构化证据、事件与审计；使用 Alembic 显式迁移。
-- **采集 worker + metrics bridge + Prometheus**：白名单只读采集与数值时序；持久任务、实例租约及递增 fence 阻止过期任务覆盖新结果。
-- **独立 AI worker**：只读取已授权的冻结历史资料，没有任意 SQL、Shell 或目标写操作工具。凭据加密保存，主密钥位于仓库外。
+关系图区分**已观测、已登记、候选解释、条件预测**。报告中的问题主体与完整分析范围分别展示，数据库异常不会把主机或探针指标误标成数据库自身的测量。连线和同时变化的曲线用于解释已有关系，不自动证明因果。
 
-## 五分钟走读
+报告绑定不可变证据清单与时间窗。点击证据引用可回查原始快照或精确的冻结指标窗口；新一轮分析生成新版本。人工复核、处置记录、后续复验和知识条目沿用原平台流程。
 
-适用于已完成初始化、接入隔离目标并保留案例的环境。全新部署从空平台开始，需先配置组织、授权和目标；公开源码不附带私密控制库或历史案例数据。走读现有记录无需重新注入故障或调用付费模型。
+### 实际案例：后台周期分析一条锁等待链
 
-| 时间 | 页面与动作 | 关注点 |
-| --- | --- | --- |
-| 0–1 分钟 | 工作台 → 资产目录，查看一个实例及接入向导 | 已登记、已启用和当前授权可见是不同概念；新实例通过向导接入，无需改代码 |
-| 1–2 分钟 | 实例详情 → 指标、SQL、锁与日志 | 先选绝对时间窗，再核对来源、新鲜度和缺口；执行计划行数是估计 |
-| 2–3 分钟 | 事件中心 → 持续锁等待案例 → AI 调查 | 从报告引用回到冻结证据和指标，检查事实是否有对应观察 |
-| 3–4 分钟 | 处置计划 → 执行记录 → 两次复验 | `SELECT 1` 成功仍是 `not_improved`；释放阻塞后，新样本满足条件才得到 `improved` |
-| 4–5 分钟 | 知识库 → 案例版本与来源清单 | 查看负向对照、有效处置和证据范围；自动化验收账号审核与用户人工审阅明确区分 |
+在独立 Lab 的 45 秒锁实验中，后台 **periodic 自动巡检**完成了 **2 次真实 DeepSeek 调用与 2 次白名单只读工具调用**。冻结窗口包含实际锁快照；报告中的阻塞事务 `1864` / 线程 `14485` → 等待事务 `1868` / 线程 `14524`，已与原始归一化快照逐项核对。
 
-完整步骤、SQL 索引案例及讲解要点见[案例与十五分钟演示](docs/platform/08-case-and-demo.md)。
+报告保留 4 条事实、2 条候选解释和 1 条显式待核验 finding。另核对了引用清单、数据库 / 主机 / 探针三对象范围及提供商审计；早期引用失败与窗口不覆盖异常的记录仍保留。该结果证明这次受控等待链的分析已运行，不代表业务根因已经证明或平台自动恢复。过程和剩余边界见[实际验收](docs/acceptance-zabbix.md#已核对的自动周期锁案例)。
 
-## 安装与启动
+## 指标看板保留数值含义
 
-当前部署流程面向 **Windows + PowerShell**，需要 Python **3.12**、Node **22.12+** 或支持 Vite 8 的兼容版本，以及独立安装的 MySQL 和 Prometheus。参考组件版本与初始化命令见[安装指南](docs/platform/07-operations.md)。
+![指标看板：数据库、主机与探针的实际时序、来源、单位和缺口](docs/images/intelligence-metrics.jpg)
 
-在所选工作目录获取源码并安装锁定依赖：
+需要了解现在的情况时，从报告进入“当前指标”或直接打开指标看板，选择授权对象与窗口。当前查询与历史报告分开，缺数保持缺口，不补成零或健康状态。
+
+数据库模板并不自动包含完整诊断资料。SQL 摘要的累计计数、窗口差分和生命周期最大值有不同含义；连接探针耗时也可能包含认证和查询。平台保留这些语义，再让规则与模型使用。
+
+## 开始使用
+
+### 已有部署：四步启用巡检
+
+1. **连接来源**：在“监控对象”中点击“连接 Zabbix 来源”，填写所属系统、只读 API 与受限主机组。Token 加密保存在服务端，不返回浏览器。
+2. **选择对象**：发现已有数据库、主机与探针，选择需要巡检的对象，核对能力和最近观察。此路径无需目标数据库口令。
+3. **保存策略**：在“巡检设置”指定负责人、对象、模式、周期、冷却与每日运行上限。真实模型模式还需要供应商配置、当前授权及明确外发许可。
+4. **查看结果**：回到“问题与风险”，等待后台完成。没有合格异常的周期留在巡检历史，不为增加问题数量制造告警。
+
+默认轻量检查周期为 300 秒、综合分析周期为 1800 秒；可在策略内调整。单次调查最多五个资源，每位用户最多三个在途调查，较大范围分组调度。顶部浏览范围不会悄悄改写已保存策略。完整步骤与异常排查见[操作指南](docs/user-guide.md)。
+
+### 新部署：从空平台初始化
+
+当前部署工具面向 **Windows + PowerShell、Python 3.12、Node 22.12+ 或支持 Vite 8 的兼容版本**。使用独立 MySQL 控制库；现有部署工具同时准备原直采路径使用的 Prometheus。Zabbix 服务及只读权限由操作者提供。
 
 ```powershell
 git clone https://github.com/catdogrennie-gt/db-evidence-platform.git
@@ -75,94 +82,101 @@ npm --prefix frontend ci
 npm --prefix frontend run build
 ```
 
-随后按安装指南完成：**生成仓库外私密目录 → 初始化独立控制 MySQL → 执行迁移 → 初始化账号与授权 → 启动服务**。准备入口为 [prepare_local.py](scripts/platform/prepare_local.py)，它仅生成新部署配置，不下载组件或启动服务，拒绝覆盖任何已有目标目录。
+随后按[安装指南](docs/platform/07-operations.md)完成**仓库外私密目录 → 控制库初始化 → Alembic 迁移 → 账号与业务授权 → 服务启动**。API 不自动建库或迁移。新部署从零业务数据开始，默认是 `rules_only`，无需模型账号即可启动；没有仓库通用密码。
 
-账号口令在本地随机生成，由私密初始化文件交付；仓库没有默认口令。默认初始化只有控制面管理员、零业务数据授权，模型为空配置，策略为 `rules_only`。无需模型账号即可启动空平台。目标监控账号、核验过的 SSH/TLS 资料与模型外发许可需明确配置。
-
-**完成首次初始化后**，在克隆仓库根目录使用 Windows 管理脚本；以下私密目录示例由操作者自行选择：
+安装完成后，在仓库根目录使用实际平台管理入口：
 
 ```powershell
 $platformConfig = Join-Path $env:LOCALAPPDATA 'DBEvidencePlatform-private\config.json'
 .\scripts\platform\manage.ps1 -Action Start -Services mysql,prometheus,api,worker,ai -ConfigPath $platformConfig
 .\scripts\platform\manage.ps1 -Action Status -Services mysql,prometheus,api,worker,ai -ConfigPath $platformConfig
-
-# 日常重启或停止应用进程，控制库与时序服务继续运行
-.\scripts\platform\manage.ps1 -Action Restart -Services api,worker,ai -ConfigPath $platformConfig
-.\scripts\platform\manage.ps1 -Action Stop -Services api,worker,ai -ConfigPath $platformConfig
 ```
 
-默认浏览器入口为 [http://127.0.0.1:18080](http://127.0.0.1:18080)，以私密配置的 `public_origin` 为准。实际平台入口是 `scripts/platform/manage.ps1`；根目录 `start.ps1` 属于历史实验应用。管理脚本默认只处理 API、采集和 AI，管理控制 MySQL / Prometheus 时需显式列出对应服务。
+默认入口为 [http://127.0.0.1:18080](http://127.0.0.1:18080)，以自己的私密配置 `public_origin` 为准。根目录 `start.ps1` 属于更早的实验应用；本平台使用 `scripts/platform/manage.ps1`。原 MySQL 直连接入与处置页面保留在“调查与管理”中。
 
-## 已验证的案例
+## 系统如何组成
 
-### 事务阻塞：无效动作也必须如实记录
+```mermaid
+flowchart LR
+    DB[MySQL] --> Z[既有 Zabbix]
+    HOST[主机] --> Z
+    PROBE[连接探针] --> Z
+    Z -->|只读 API / 原始历史| C[采集与指标适配]
+    C --> S[("MySQL 控制库<br/>映射 / 证据 / 事件 / 巡检策略")]
+    S --> W[后台巡检与持久任务]
+    W --> F[冻结证据清单与窗口]
+    F --> AI["独立 AI worker<br/>受限只读工具"]
+    AI --> R[报告 / 候选解释 / 未知]
+    S --> API[统一授权 API]
+    R --> API
+    C -->|当前指标| API
+    API --> UI["React 工作区<br/>问题 / 图表 / 人工流程"]
+```
 
-在隔离目标制造真实锁等待，后台采集形成证据与事件。先执行无效的连通检查，三个后续样本仍有相同等待链，确定性复验返回 `not_improved`；再由外部受控工具回滚阻塞事务，新的三个样本满足选定锁链消失条件，返回 `improved`，随后结案并保存知识版本。
+| 组件 | 责任 |
+| --- | --- |
+| React / TypeScript、Ant Design、ECharts | 结果首页、证据关系、曲线、接入与原人工工作流 |
+| FastAPI、SQLAlchemy / Alembic、MySQL | 统一身份及业务授权、来源映射、证据、事件、报告、策略和任务记录 |
+| 采集与巡检 worker | 只读来源采集、信号计算、周期与紧急调度；租约、fence、唯一派发和预算约束并发 |
+| 独立 AI worker | 读取已授权冻结资料，执行白名单只读工具，检查引用并保存报告；与采集队列分离 |
+| Zabbix / 原 Prometheus 路径 | 保留各自原始时序；调查按窗口物化有限副本，旧 `prometheus_window` 与新 `time_series_window` 共存 |
 
-独立的真实 DeepSeek 调查完成 **两次模型调用、两次工具调用**，报告引用五份证据及一个冻结 Prometheus 窗口，引用经过实际读取核查。此前失败尝试保留。该记录支持已知锁案例的证据解释，不代表通用诊断准确率。
-
-<details>
-<summary>查看真实运行截图：带证据引用的 AI 报告</summary>
-
-![真实模型调查报告局部：事实、假设、未知与冻结证据引用](docs/platform/screenshots/ai-cited-report.png)
-
-本地隔离案例的报告局部截图，基于冻结实验资料；不是生产诊断结果。
-
-</details>
-
-### SQL 索引：固定负载下比较前后窗口
-
-对三万行合成数据执行固定约 **0.5 QPS** 查询，保留无效动作对照、后台摘要、受限 EXPLAIN 和前后各三份样本。
-
-| 比较阶段 | 实测平均耗时 | 复验结果 |
-| --- | --- | --- |
-| 基线 → 无效 `SELECT 1` 后窗 | 约 4.979 → 4.053 ms | 未达到预设至少 50% 降低门槛，`not_improved` |
-| 无效后窗 → 增加受控索引后窗 | 约 4.053 → 0.451 ms；调用率比约 0.992 | `improved`，仅覆盖该查询、负载和窗口 |
-
-平台保存计划、审核、外部执行记录和复验；索引操作由独立受控实验工具执行。结束后恢复原索引集合，并核对有序数据摘要未变。完整过程保留了窗口不足导致 `inconclusive` 的失败尝试。
-
-两个案例均不证明生产收益、业务恢复或完整因果关系。实际步骤、测量口径及剩余缺口见[案例说明](docs/platform/08-case-and-demo.md)和[验收索引](docs/platform/06-acceptance-status.md)。
+这是独立 Web 平台。Grafana 可作为后续外链看板，当前不作为运行依赖；Zabbix 不被另一个时序存储替代。设计、数据与接口细节见[本轮架构说明](docs/superpowers/specs/2026-11-08-zabbix-intelligence-design.md)。
 
 ## 验证与复现
 
-在已安装依赖的仓库根目录执行：
+当前改造在个人隔离环境验证。实际目标测量、确定性规则、模拟提供商与真实外部模型分别记录；一次模型完成不代表所有表述都正确。
+
+| 本轮检查 | 当前结果 |
+| --- | --- |
+| 实际 Zabbix 来源与对象接口 | 3 个映射对象、14 项 HTTP 检查通过，覆盖来源、选择、能力与实际历史读取 |
+| 后台正常周期 | `rules_only` 自主巡检完成；该窗口无合格问题，正常结果留在巡检历史 |
+| 服务重启 | 已核对策略、映射及记录持久化；不是长期稳定性或高可用测试 |
+| 真实模型与锁案例 | 正常模型周期及一次自动周期锁分析完成；锁链四个编号、方向、冻结引用与三对象范围已逐项核对 |
+| 权限、冻结与并发 | 8 项报告范围 HTTP 对照通过；843 个冻结清单项含 8 个窗口保持不变；限定真实 MySQL 多进程派发与预算检查通过 |
+| 最终源码回归 | Python 546 通过、10 跳过、6 个子检查通过；前端 18 通过，类型检查、构建、16 项 workflow / 7 项 connection 契约及依赖检查通过 |
+| SQL 压力与剩余检查 | 实际负载和清理已有记录；缺少真实 counter epoch，SQL 窗口差分及根因诊断未验证；大窗口曲线预算的整体省略问题尚未修复 |
+
+逐项方法、阶段回归、保留失败和未覆盖范围见[本轮验收矩阵](docs/acceptance-zabbix.md)。以上是隔离环境的限定结果，不把某次完成或历史测试数外推为全系统验收。
+
+在已安装依赖的仓库根目录可运行：
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests/platform -q
 .\.venv\Scripts\python.exe -m pip check
+npm --prefix frontend test
+npm --prefix frontend run typecheck
 node frontend/scripts/check-workflow-contracts.cjs
 node frontend/scripts/check-connection-contracts.cjs
 npm --prefix frontend run build
 ```
 
-2026-11-08 [本地完整回归记录](docs/platform/06-acceptance-status.md#5-可重现的局部检查)：**414 通过、9 跳过、6 个子检查通过**。跳过项需要显式真实 MySQL / TLS 配置，不计入通过；前端契约检查及生产构建通过，存在非阻断分包体积提示。以上为本地验收快照，完整证据范围以验收索引为准。
+真实 MySQL / TLS 连接用例需显式环境配置，跳过不计通过；真实模型调用需另配供应商、权限与外发许可。公开源码不携带本机账号、控制库或原始运行记录。
 
-真实验收另覆盖第三目标向导接入、单实例故障隔离、采集进程重启、TLS 正反例、多角色 HTTP 权限矩阵、历史窗口与限时导出。模拟提供商故障测试、规则结果、实时模型输出和真实目标测量分别记录；隔离测试数量不替代全部端到端验收。
+<details>
+<summary>历史案例：事务阻塞、无效处置对照与 SQL 索引复验</summary>
 
-## 当前边界
+改造前版本保留了三个独立 MySQL 合成目标的真实采集与两类受控案例：锁等待中先执行无效动作，确定性复验为 `not_improved`，外部受控释放阻塞后新样本为 `improved`；SQL 索引案例比较固定负载的前后窗口，并保留 `inconclusive` 及无效动作对照。
 
-| 范围 | 状态与限制 |
-| --- | --- |
-| MySQL 平台主流程 | 已实现并验证核心路径；不同版本、完整异常组合及部分页面体验仍待补验，逐项状态以 FR / AT 验收表为准 |
-| 运行规模 | 真实验证为三个隔离目标、五种本地角色；短测和热缓存结果不能外推十实例容量、长期稳定性或采集开销 |
-| 数据保留 | 证据保护与部分清理已实现；业务对象 / 审计 90 天为配置策略，依赖感知物理清理未完整实现，状态页保留警告 |
-| 自动执行 | 当前记录人工方案和外部执行，再确定性复验；通用目标变更执行器未实现 |
-| 扩展与集成 | PostgreSQL、Grafana、企业 SSO / 工单、深入复制诊断、容量预测及高可用未完成 |
-| 备份恢复 | 历史实验模块保留独立验证记录，尚未整合为当前平台的备份作业与恢复验证产品 |
+它们说明原平台的调查、人工记录、复验与知识链路，不能证明新版 Zabbix 接入或新模型案例已经通过。固定源码、测量口径与边界见[历史 Release](https://github.com/catdogrennie-gt/db-evidence-platform/releases/tag/legacy-platform-2026.11.08)及[回溯说明](docs/releases/legacy-platform-2026.11.08.md)。
 
-原始邮件、简历、证书、联系方式、凭据和密钥不属于公开交付物。运行目录、控制库、TSDB、日志及私密导出需独立保管；源码克隆后按安装指南配置自己的环境。
+</details>
 
-## 代码与文档导航
+## 当前范围
 
-```text
-platform_app/         授权 API、采集、规则、调查、复验与知识
-frontend/             React / TypeScript 工作区
-migrations/           控制库 Alembic 迁移
-scripts/platform/     私密部署准备、进程管理与验收工具
-tests/platform/       平台隔离回归及显式启用的真实连接测试
-docs/platform/        需求、架构、页面流程、安装、验收与案例
-```
+当前重点是 **MySQL、Zabbix 已有数据、Windows 单机内部部署**。一个上游 host 对应一个可辨识的逻辑对象，无法区分的多数据库映射会被拒绝。锁、SQL、日志或计划的深度取决于来源实际提供的资料，不靠模板名补全。
 
-- [业务与功能需求](docs/platform/01-requirements.md) · [系统架构与数据契约](docs/platform/02-architecture.md) · [页面及工作流](docs/platform/03-pages-and-workflows.md)
-- [实施计划](docs/platform/04-delivery-plan.md) · [参考规范](docs/platform/05-skills-and-references.md) · [设计图与可点击原型](docs/platform/index.html)（下载后本地打开；其中示例数据不是实测证据）
-- [历史实验说明](README-legacy-lab.md)：固定实例诊断与恢复实验的原始入口，与当前平台分开追溯。
+模型输出是待核验解释。平台不自动执行数据库变更、任意 SQL、Shell 或邮件发送；权限撤销、来源离线、缺少外发许可、预算耗尽和模型失败应保留可见状态。PostgreSQL、企业 SSO、完整保留清理、十实例容量、长期稳定性、高可用与公网部署仍未完成验证。
+
+本次按当前版本收尾，不将尚未完成的曲线预算修复计入发布。本机演示的自动模型策略保持暂停，既有报告和当前指标仍可查看，可在巡检设置中重新启用。
+
+## 文档与历史
+
+- [操作指南](docs/user-guide.md)：接入、策略、报告、指标和异常处理。
+- [安装与运行](docs/platform/07-operations.md)：私密目录、初始化、迁移、启停与升级。
+- [实际验收矩阵](docs/acceptance-zabbix.md)：真实来源、权限、冻结、并发、受控锁案例、最终回归及当前边界。
+- [本轮设计](docs/superpowers/specs/2026-11-08-zabbix-intelligence-design.md) · [变更记录](CHANGELOG.md) · [README 素材与参考规范](docs/readme-guidelines.md)。
+- [历史 Release](https://github.com/catdogrennie-gt/db-evidence-platform/releases/tag/legacy-platform-2026.11.08)：保留改造前公开源码；[版本索引](docs/releases/README.md)提供精确提交与恢复路径。
+- [原平台设计与案例](docs/platform/README.md) · [更早的独立实验模块](README-legacy-lab.md)。
+
+源码目录：`platform_app/` 后端与 worker，`frontend/` 界面，`migrations/` 控制库迁移，`tests/platform/` 回归，`scripts/platform/` 部署与验收工具。

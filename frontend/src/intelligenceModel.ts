@@ -1,0 +1,443 @@
+import type { Row } from './api';
+
+export interface Capability {
+  name: string;
+  status: 'available' | 'missing' | 'unsupported' | 'stale' | 'failed';
+  reason?: string;
+}
+export interface SeriesPoint {
+  time: string;
+  value: number | null;
+  validity?: string;
+}
+export interface MetricChartData {
+  id: string;
+  title: string;
+  unit: string;
+  source: string;
+  points: SeriesPoint[];
+  gaps: Row[];
+  baseline?: SeriesPoint[];
+  threshold?: number;
+  window: { from: string; to: string };
+  coverage?: Row;
+  instance_id?: string;
+  object_name?: string;
+  metric_key?: string;
+}
+export type IssueCategory = 'locks' | 'sql' | 'host' | 'network' | 'correlation' | 'unknown';
+export interface ReportFreshness {
+  status: 'current' | 'outdated' | 'pending' | 'unavailable';
+  reason: string | null;
+  event_updated_at: string | null;
+  report_window_to: string | null;
+}
+export interface Issue {
+  id: string;
+  title: string;
+  kind: 'current' | 'risk';
+  status: string;
+  severity: string;
+  summary: string;
+  object_names: string[];
+  instance_ids: string[];
+  first_seen_at: string;
+  updated_at: string;
+  investigation_id: string | null;
+  analysis_mode: string;
+  coverage_status: string;
+  finding_status?: 'observed' | 'hypothesis' | 'conditional_prediction';
+  issue_category?: IssueCategory;
+  report_freshness?: ReportFreshness;
+}
+export type GraphKind = 'observed' | 'registered' | 'hypothesis' | 'conditional_prediction';
+export interface EvidenceNode {
+  id: string;
+  label: string;
+  kind: GraphKind;
+  summary: string;
+  evidence_ids: string[];
+  instance_id?: string;
+  object_name?: string;
+  metric_key?: string;
+  evidence_category?: IssueCategory;
+  source?: string;
+}
+export interface EvidenceEdge {
+  from: string;
+  to: string;
+  relationship: string;
+  kind: GraphKind;
+  evidence_ids: string[];
+  provenance?: string;
+}
+export interface IssueDetail extends Issue {
+  window: { from: string; to: string } | null;
+  report: Row | null;
+  nodes: EvidenceNode[];
+  edges: EvidenceEdge[];
+  charts: MetricChartData[];
+  checks: Capability[];
+  next_checks: string[];
+  unknowns: string[];
+  refutations: string[];
+  history: { id: string; created_at: string; status: string; mode: string }[];
+  event_id: string;
+  event_subject?: { id: string; name: string };
+  analysis_instance_ids?: string[];
+  analysis_objects?: Array<{ id: string; name: string; engine: string }>;
+}
+export interface IntelligenceOverview {
+  stats: { current: number; risk: number; objects: number };
+  issues: Issue[];
+  inspection: {
+    status: string;
+    last_completed_at?: string | null;
+    next_due_at?: string | null;
+    mode?: string;
+    reason?: string;
+  };
+  coverage: { status: string; missing_count: number };
+}
+export interface MonitoringSource {
+  id: string;
+  name: string;
+  url: string;
+  system_id: string;
+  status: string;
+  last_success_at?: string;
+  error_code?: string;
+  has_token: boolean;
+}
+export interface DiscoveredHost {
+  hostid: string;
+  name: string;
+  layer: string;
+  capabilities: Capability[];
+  selected: boolean;
+  instance_id: string | null;
+  item_count: number;
+  binding_error?: string | null;
+}
+export interface MonitoringObject {
+  id: string;
+  name: string;
+  engine: string;
+  system_id: string;
+  system_name: string;
+  source_id: string;
+  source_name: string;
+  enabled: boolean;
+  capabilities: Capability[];
+  last_observed_at?: string;
+  status: string;
+}
+export interface InspectionPolicy {
+  id?: string;
+  version?: number;
+  enabled: boolean;
+  instance_ids: string[];
+  signal_interval_seconds: number;
+  ai_interval_seconds: number;
+  urgent_enabled: boolean;
+  cooldown_seconds: number;
+  max_daily_runs: number;
+  mode: string;
+  external_confirmed: boolean;
+  status?: string;
+  last_completed_at?: string;
+  next_due_at?: string;
+}
+export interface ObjectMetrics {
+  object: { id: string; name: string };
+  charts: MetricChartData[];
+  capabilities: Capability[];
+  window: { from: string; to: string };
+}
+export interface ResourceScope {
+  department_id?: string;
+  system_id?: string;
+  environment?: string;
+  instance_id?: string;
+}
+
+export const graphKinds: Record<GraphKind, { label: string; color: string; dashed: boolean }> = {
+  observed: { label: '已观测', color: '#2768cc', dashed: false },
+  registered: { label: '登记关系', color: '#53776a', dashed: false },
+  hypothesis: { label: '候选解释', color: '#aa761b', dashed: true },
+  conditional_prediction: { label: '条件预测', color: '#9a5db2', dashed: true },
+};
+
+export function chartData(points: SeriesPoint[]): Array<[string, number | null]> {
+  return points.map((p) => [
+    p.time,
+    typeof p.value === 'number' &&
+    Number.isFinite(p.value) &&
+    (!p.validity || ['valid', 'available', 'observed'].includes(p.validity))
+      ? p.value
+      : null,
+  ]);
+}
+export function reportState(
+  data: Pick<IssueDetail, 'report' | 'status' | 'investigation_id'>,
+): 'ready' | 'failed' | 'pending' | 'unavailable' {
+  if (['failed', 'interrupted', 'cancelled', 'expired', 'model_failed'].includes(data.status))
+    return 'failed';
+  if (
+    ['queued', 'preparing', 'analyzing', 'running', 'collecting_evidence', 'pending'].includes(
+      data.status,
+    )
+  )
+    return 'pending';
+  if (data.report && Object.keys(data.report).length) return 'ready';
+  if (
+    data.investigation_id ||
+    ['queued', 'preparing', 'analyzing', 'running', 'collecting_evidence', 'pending'].includes(
+      data.status,
+    )
+  )
+    return 'pending';
+  return 'unavailable';
+}
+export function visibleGraph(
+  nodes: EvidenceNode[],
+  edges: EvidenceEdge[],
+): { nodes: EvidenceNode[]; edges: EvidenceEdge[] } {
+  const safeNodes = nodes.filter((n) => Object.hasOwn(graphKinds, n.kind));
+  const ids = new Set(safeNodes.map((n) => n.id));
+  return {
+    nodes: safeNodes,
+    edges: edges.filter(
+      (e) => ids.has(e.from) && ids.has(e.to) && Object.hasOwn(graphKinds, e.kind),
+    ),
+  };
+}
+export function selectionForScope(previous: string, current: string, selected: string[]): string[] {
+  return previous === current ? selected : [];
+}
+export function scopeKey(scope: ResourceScope): string {
+  return JSON.stringify([
+    scope.department_id ?? '',
+    scope.system_id ?? '',
+    scope.environment ?? '',
+    scope.instance_id ?? '',
+  ]);
+}
+export function sourcePayload(values: Row, editing: boolean): Row {
+  const groups =
+    typeof values.groups === 'string'
+      ? values.groups
+          .split(',')
+          .map((v) => v.trim())
+          .filter(Boolean)
+      : [];
+  return {
+    name: values.name,
+    url: values.url,
+    system_id: values.system_id,
+    ...(values.api_token ? { api_token: values.api_token } : {}),
+    ...(!editing || groups.length ? { allowed_host_group_ids: groups } : {}),
+  };
+}
+export function frozenMetricPath(investigationId: string | null, reference: string): string | null {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const item = reference.startsWith('manifest:') ? reference.slice(9) : '';
+  return investigationId && uuid.test(investigationId) && uuid.test(item)
+    ? `/investigations/${investigationId}/metric-windows/${item}`
+    : null;
+}
+export function findingLabel(issue: Pick<Issue, 'kind' | 'finding_status'>): string {
+  if (issue.finding_status === 'hypothesis') return '候选解释 · 待核验';
+  if (issue.finding_status === 'conditional_prediction') return '条件预测';
+  return issue.kind === 'current' ? '当前问题' : '潜在风险';
+}
+export function initialSidebarCollapsed(width: number): boolean {
+  return width < 992;
+}
+export function reportMetricTargets(
+  data: Pick<IssueDetail, 'analysis_objects' | 'instance_ids' | 'object_names'>,
+): Array<{ id: string; name: string }> {
+  return data.analysis_objects?.length
+    ? data.analysis_objects.map(({ id, name }) => ({ id, name }))
+    : data.instance_ids.map((id, i) => ({ id, name: data.object_names[i] ?? '对象' }));
+}
+
+// Only the API's typed category and canonical template key affect relevance.
+// Display titles, prose and array order are never evidence of issue category.
+const categoryMetrics: Record<IssueCategory, string[]> = {
+  locks: ['lock_waits', 'threads_running', 'transactions', 'questions_per_second', 'connections'],
+  sql: ['threads_running', 'questions_per_second', 'connections', 'transactions', 'lock_waits'],
+  host: [
+    'host_cpu_percent',
+    'host_cpu_busy_ratio',
+    'host_disk_read_bytes_per_second',
+    'host_disk_write_bytes_per_second',
+    'host_load1',
+    'host_memory_available_bytes',
+  ],
+  network: [
+    'probe_availability',
+    'probe_latency_ms',
+    'bytes_received_per_second',
+    'bytes_sent_per_second',
+  ],
+  correlation: [],
+  unknown: [],
+};
+
+function metricPriority(key: string | undefined, category: IssueCategory): number {
+  const rank = key ? categoryMetrics[category].indexOf(key) : -1;
+  return rank < 0 ? 100 : rank;
+}
+
+export function prioritizeIssueCharts(
+  charts: MetricChartData[],
+  category: IssueCategory = 'unknown',
+  subjectId?: string,
+): MetricChartData[] {
+  return [...charts].sort((a, b) => {
+    const relevance =
+      metricPriority(a.metric_key, category) - metricPriority(b.metric_key, category);
+    if (relevance) return relevance;
+    // Match the event subject only within an equally relevant metric; never let
+    // an unrelated subject metric displace a relevant cross-object observation.
+    if (metricPriority(a.metric_key, category) < 100 && subjectId)
+      return Number(b.instance_id === subjectId) - Number(a.instance_id === subjectId);
+    return 0;
+  });
+}
+
+export function prioritizeIssueNodes(
+  nodes: EvidenceNode[],
+  edges: EvidenceEdge[],
+  category: IssueCategory = 'unknown',
+  subjectId?: string,
+): EvidenceNode[] {
+  const relevant = new Set(
+    nodes
+      .filter(
+        (node) =>
+          metricPriority(node.metric_key, category) < 100 ||
+          (category !== 'unknown' && node.evidence_category === category),
+      )
+      .map((node) => node.id),
+  );
+  const neighbors = new Set(
+    edges
+      .filter((edge) => relevant.has(edge.from) || relevant.has(edge.to))
+      .flatMap((edge) => [edge.from, edge.to]),
+  );
+  function priority(node: EvidenceNode): number {
+    if (node.kind === 'observed' && relevant.has(node.id)) {
+      const metric = metricPriority(node.metric_key, category);
+      return metric < 100 ? metric / 100 : 0.5;
+    }
+    if (node.kind === 'registered' && (node.id === subjectId || neighbors.has(node.id))) return 1;
+    if (neighbors.has(node.id)) return node.kind === 'observed' ? 1.5 : 2;
+    return node.kind === 'observed' ? 3 : node.kind === 'registered' ? 4 : 5;
+  }
+  return [...nodes].sort((a, b) => priority(a) - priority(b));
+}
+
+export function compactIssueNodes(
+  nodes: EvidenceNode[],
+  edges: EvidenceEdge[],
+  category: IssueCategory = 'unknown',
+  subjectId?: string,
+  limit = 9,
+): EvidenceNode[] {
+  const ordered = prioritizeIssueNodes(nodes, edges, category, subjectId);
+  const ids = new Set(nodes.map((node) => node.id));
+  const isRaw = (node: EvidenceNode) =>
+    node.kind === 'observed' && !!node.source && !node.metric_key;
+  const isFact = (node: EvidenceNode) =>
+    node.kind === 'observed' && !node.source && !node.metric_key;
+  const statements = nodes.filter(
+    (node) => isFact(node) || ['hypothesis', 'conditional_prediction'].includes(node.kind),
+  );
+  // Choose a directly referenced representative per source and object. The API
+  // does not expose typed snapshot time/content here, so this makes no claim
+  // about recency or whether a snapshot proves an abnormal value.
+  const rawKey = (node: EvidenceNode) => JSON.stringify([node.instance_id ?? '', node.source]);
+  const referenceCount = (node: EvidenceNode) =>
+    statements.filter(
+      (statement) =>
+        statement.evidence_ids.includes(node.id) ||
+        edges.some(
+          (edge) =>
+            (edge.from === node.id && edge.to === statement.id) ||
+            (edge.to === node.id && edge.from === statement.id),
+        ),
+    ).length;
+  const representatives = new Map<string, EvidenceNode>();
+  for (const node of ordered.filter(isRaw)) {
+    const previous = representatives.get(rawKey(node));
+    if (!previous || referenceCount(node) > referenceCount(previous))
+      representatives.set(rawKey(node), node);
+  }
+  const available = ordered.filter(
+    (node) => !isRaw(node) || representatives.get(rawKey(node))?.id === node.id,
+  );
+  const selected: EvidenceNode[] = [];
+  const selectedIds = new Set<string>();
+  function pick(predicate: (node: EvidenceNode) => boolean) {
+    const node = available.find(
+      (candidate) => !selectedIds.has(candidate.id) && predicate(candidate),
+    );
+    if (node && selected.length < limit) {
+      selected.push(node);
+      selectedIds.add(node.id);
+    }
+  }
+  const relevant = (node: EvidenceNode) =>
+    metricPriority(node.metric_key, category) < 100 ||
+    (category !== 'unknown' && node.evidence_category === category);
+  const linked = (node: EvidenceNode) =>
+    node.evidence_ids.some((ref) => selectedIds.has(ref)) ||
+    edges.some(
+      (edge) =>
+        (edge.from === node.id && selectedIds.has(edge.to)) ||
+        (edge.to === node.id && selectedIds.has(edge.from)),
+    );
+  const supported = (node: EvidenceNode) => node.evidence_ids.some((ref) => ids.has(ref));
+  pick((node) => node.kind === 'observed' && !!node.metric_key && relevant(node));
+  pick((node) => isRaw(node) && relevant(node));
+  pick((node) => node.kind === 'registered' && node.id === subjectId);
+  pick((node) => isFact(node) && linked(node));
+  if (!selected.some(isFact)) pick((node) => isFact(node) && supported(node));
+  for (const kind of ['hypothesis', 'conditional_prediction']) {
+    pick((node) => node.kind === kind && linked(node));
+    if (!selected.some((node) => node.kind === kind))
+      pick((node) => node.kind === kind && supported(node));
+  }
+  const layer = (node: EvidenceNode) => {
+    if (node.kind !== 'observed') return undefined;
+    if (
+      categoryMetrics.network.includes(node.metric_key ?? '') ||
+      node.evidence_category === 'network'
+    )
+      return 'network';
+    if (categoryMetrics.host.includes(node.metric_key ?? '') || node.evidence_category === 'host')
+      return 'host';
+    if (
+      categoryMetrics.locks.includes(node.metric_key ?? '') ||
+      categoryMetrics.sql.includes(node.metric_key ?? '') ||
+      ['locks', 'sql'].includes(node.evidence_category ?? '')
+    )
+      return 'database';
+    return undefined;
+  };
+  // Reserve space for cross-layer observations before filling with more facts
+  // or explanations of the same layer. These are context, not causal claims.
+  for (const target of ['database', 'host', 'network']) {
+    if (!selected.some((node) => layer(node) === target)) pick((node) => layer(node) === target);
+  }
+  const directRefs = new Set(selected.flatMap((node) => node.evidence_ids));
+  pick((node) => directRefs.has(node.id));
+  const owners = new Set(selected.map((node) => node.instance_id).filter(Boolean));
+  for (const node of available)
+    if (node.kind === 'registered' && owners.has(node.id))
+      pick((candidate) => candidate.id === node.id);
+  for (const node of available) pick((candidate) => candidate.id === node.id);
+  return selected;
+}

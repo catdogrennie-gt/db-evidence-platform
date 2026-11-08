@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import math
 import re
 import json
@@ -10,6 +11,7 @@ from collections import Counter
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import func, select
+from sqlalchemy.orm import object_session
 
 from .access import authorize
 from .common import PlatformError, iso, parse_time
@@ -46,6 +48,7 @@ LOCK_FIELDS = {
 DIGEST_FIELDS = {
     "COUNT_STAR",
     "SUM_TIMER_WAIT",
+    "MAX_TIMER_WAIT",
     "SUM_LOCK_TIME",
     "SUM_ROWS_SENT",
     "SUM_ROWS_EXAMINED",
@@ -90,6 +93,7 @@ METRIC_FIELDS = {
 from .metrics_derivation import REGISTRY as _METRIC_REGISTRY
 
 METRIC_FIELDS.update(_METRIC_REGISTRY)
+METRIC_FIELDS.update({"host_cpu_percent", "host_disk_read_bytes_per_second", "host_disk_write_bytes_per_second", "probe_latency_ms", "probe_availability"})
 CONFIG_NUMERIC = {
     "max_connections",
     "innodb_buffer_pool_size",
@@ -148,6 +152,49 @@ def _numeric_fields(row, keys):
     return {key: number(row[key]) for key in keys if key in row and number(row[key]) is not None}
 
 
+def _identifier_aliaser(row):
+    """Secret-keyed aliases correlate authorized structure without sending names."""
+    session = object_session(row)
+    config = session.info.get('platform_config') if session is not None else None
+    try:
+        key = config.fernet_key_path.read_bytes().strip() if config is not None else None
+    except OSError:
+        key = None
+    def alias(value):
+        if not key or not isinstance(value, str) or not value or len(value) > 255:
+            return None
+        message = json.dumps(['evidence-identifier-v1', row.instance_id, value], ensure_ascii=False).encode()
+        return 'id_' + hmac.new(key, message, hashlib.sha256).hexdigest()[:20]
+    return alias, bool(key)
+
+
+SQL_KEYWORDS = frozenset('SELECT INSERT UPDATE DELETE FROM WHERE JOIN GROUP ORDER LIMIT HAVING UNION DISTINCT AND OR NOT IN IS NULL LIKE BETWEEN EXISTS AS ON SET VALUES ASC DESC USING LEFT RIGHT INNER OUTER CROSS CASE WHEN THEN ELSE END BY OFFSET FOR LOCK SHARE KEY PRIMARY INDEX FORCE USE EXPLAIN'.split())
+SQL_TOKEN = re.compile(r"/\*[\s\S]*?(?:\*/|$)|--[^\n]*|\#[^\n]*|'(?:''|\\.|[^'\\])*(?:'|$)|\"(?:\"\"|\\.|[^\"\\])*(?:\"|$)|`(?:``|[^`])*(?:`|$)|\b(?:0[xX][0-9a-fA-F]+|0[bB][01]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)\b|[a-zA-Z_$][a-zA-Z0-9_$]*|<=|>=|<>|!=|[(),.=<>+*/%?-]")
+
+
+def _sql_structure(value, alias):
+    result = []
+    for match in SQL_TOKEN.finditer(str(value)[:4096]):
+        token = match.group()
+        if token.startswith(('/*', '--', '#')): continue
+        if token.startswith(("'", '"')) or token[0].isdigit(): token = '?'
+        elif token.startswith('`'): token = alias(token[1:-1].replace('``', '`')) or 'identifier'
+        elif re.match(r'[a-zA-Z_$]', token): token = token.upper() if token.upper() in SQL_KEYWORDS else alias(token) or 'identifier'
+        result.append(token)
+    return ' '.join(result)[:2048]
+
+
+def _structure_fields(item, alias):
+    result = {}
+    for output, names in {'schema_ref': ('OBJECT_SCHEMA', 'TABLE_SCHEMA', 'SCHEMA_NAME'), 'table_ref': ('OBJECT_NAME', 'TABLE_NAME'), 'index_ref': ('INDEX_NAME',), 'column_ref': ('COLUMN_NAME',)}.items():
+        value = next((item[name] for name in names if item.get(name)), None)
+        identifier = alias(value)
+        if identifier: result[output] = identifier
+    for name, values in {'LOCK_MODE': {'X','S','IX','IS','AUTO_INC','X,REC_NOT_GAP','S,REC_NOT_GAP','X,GAP','S,GAP'}, 'LOCK_STATUS': {'WAITING','GRANTED'}, 'LOCK_TYPE': {'RECORD','TABLE'}, 'TRX_STATE': {'RUNNING','LOCK WAIT','ROLLING BACK','COMMITTING'}, 'INDEX_TYPE': {'BTREE','HASH','FULLTEXT','RTREE'}}.items():
+        if isinstance(item.get(name), str) and item[name] in values: result[name] = item[name]
+    return result
+
+
 def project_evidence(row: Evidence) -> dict:
     """Build from field allowlists; never sanitize and forward an entire payload."""
     payload = row.payload if isinstance(row.payload, dict) else {}
@@ -156,16 +203,24 @@ def project_evidence(row: Evidence) -> dict:
         [r for r in raw_rows[:100] if isinstance(r, dict)] if isinstance(raw_rows, list) else []
     )
     data = {"row_count": len(raw_rows)}
+    alias, aliases_available = _identifier_aliaser(row)
     if row.source in ("mysql.lock_waits", "mysql.transactions", "mysql.sessions"):
-        data["rows"] = [_numeric_fields(r, LOCK_FIELDS) for r in raw_rows]
+        data["rows"] = [_numeric_fields(r, LOCK_FIELDS) | _structure_fields(r, alias) for r in raw_rows]
     elif row.source == "mysql.statement_digest":
         data["rows"] = []
+        units = payload.get("field_units") or {}
+        data["timer_unit"] = "ps" if units.get("SUM_TIMER_WAIT") == "ps" or payload.get("timer_unit") == "picoseconds" else "unknown"
+        data["snapshot_scope"] = code(payload.get("snapshot_scope"), "unknown")
+        window = payload.get("window") or {}
+        data["window"] = {"valid": window.get("valid") is True, "window_seconds": number(window.get("window_seconds")), "reason": code(window.get("reason")), "rows": [_numeric_fields(r, {"count_delta", "total_time_seconds_delta", "avg_latency_seconds"}) | ({"digest": r["DIGEST"]} if isinstance(r.get("DIGEST"), str) and re.fullmatch(r"[a-fA-F0-9]{16,64}", r["DIGEST"]) else {}) for r in window.get("rows", [])[:30] if isinstance(r, dict)]}
         for item in raw_rows:
             projected = _numeric_fields(item, DIGEST_FIELDS)
+            projected.update(_structure_fields(item, alias))
             digest = item.get("DIGEST", "")
             if isinstance(digest, str) and re.fullmatch(r"[0-9a-fA-F]{16,64}", digest):
                 projected["digest"] = digest
             text = item.get("DIGEST_TEXT", "")
+            projected['sql_shape'] = _sql_structure(text, alias)
             # SQL keywords retain shape without sending identifiers, literals, comments or SQL text.
             projected["statement_shape"] = re.findall(
                 r"\b(?:SELECT|INSERT|UPDATE|DELETE|FROM|WHERE|JOIN|GROUP|ORDER|LIMIT|HAVING|UNION|DISTINCT)\b",
@@ -185,10 +240,11 @@ def project_evidence(row: Evidence) -> dict:
                     "SEQ_IN_INDEX",
                     "CARDINALITY",
                 },
-            )
+            ) | _structure_fields(r, alias)
             for r in raw_rows
         ]
         data["metadata_names_omitted"] = True
+        data['identifier_policy'] = 'secret_keyed_instance_aliases_v1' if aliases_available else 'names_omitted_no_alias_key'
     elif row.source == "mysql.configuration":
         data["variables"] = {
             r["VARIABLE_NAME"]: number(r.get("VARIABLE_VALUE"))
@@ -211,6 +267,8 @@ def project_evidence(row: Evidence) -> dict:
             )[:20],
             "text_omitted": True,
         }
+    elif row.source == "linux.host":
+        data["values"] = _numeric_fields(payload.get("values") or {}, METRIC_FIELDS)
     elif row.source in ("mysql.status", "mysql.global_status"):
         data["values"] = {
             r.get("VARIABLE_NAME", r.get("Variable_name")): number(
@@ -265,6 +323,18 @@ def project_metric_window(row, start, end):
         value = number(point.get("value")) if validity == "valid" else None
         points.append({"time": iso(stamp), "value": value, "validity": validity})
     gaps = sorted({p["validity"] for p in points if p["value"] is None})
+    original_coverage = payload.get('coverage') if isinstance(payload.get('coverage'), dict) else {}
+    for gap in [*(payload.get('gaps') or []), *(original_coverage.get('gaps') or []), *(original_coverage.get('reason_codes') or [])][:100]:
+        if isinstance(gap, str): safe_gap = code(gap)
+        elif isinstance(gap, dict):
+            safe_gap = {'reason_code': code(gap.get('reason_code', gap.get('reason')))}
+            for field in ('from', 'to'):
+                try: safe_gap[field] = iso(parse_time(gap[field]))
+                except (KeyError, TypeError, ValueError): pass
+        else: continue
+        if safe_gap not in gaps: gaps.append(safe_gap)
+    truncated = original_coverage.get('truncated') is True
+    provenance = {key: value for key, value in (payload.get('provenance') or {}).items() if key in ('source_id','hostid','itemid','mapping_version','transport') and isinstance(value, (str, int))}
     return {
         "evidence_id": "manifest:" + row.id,
         "manifest_item_id": row.id,
@@ -272,9 +342,11 @@ def project_metric_window(row, start, end):
         "template": definition.metric_id,
         "collector": definition.owner_collector,
         "unit": definition.unit,
-        "source": "prometheus_resampled",
+        "source": "zabbix_history" if row.item_type == "time_series_window" else "prometheus_resampled",
         "points": points,
-        "coverage": {"complete": bool(points) and not gaps, "gaps": gaps},
+        "coverage": {"complete": bool(points) and not gaps and not truncated and original_coverage.get('complete') is not False, "gaps": gaps, 'truncated': truncated},
+        'provenance': provenance,
+        'window': {'from': iso(start), 'to': iso(end)},
         "payload_sha256": row.payload_sha256,
     }
 
@@ -378,7 +450,7 @@ class ToolBroker:
                             .where(
                                 ManifestItem.manifest_id == self.investigation.manifest_id,
                                 ManifestItem.instance_id == args.instance_id,
-                                ManifestItem.item_type == "prometheus_window",
+                                ManifestItem.item_type.in_(["prometheus_window", "time_series_window"]),
                             )
                             .limit(192)
                         )

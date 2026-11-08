@@ -58,6 +58,9 @@ import {
 } from './Workflow';
 import { Admin } from './Admin';
 import { TopologyView } from './Presentation';
+import { IntelligenceHome, IssueReport } from './Intelligence';
+import { InspectionSettings, MetricsDashboard, Monitoring } from './Monitoring';
+import { initialSidebarCollapsed } from './intelligenceModel';
 export default function App() {
   const [actor, setActor] = useState<Actor>();
   const [error, setError] = useState<unknown>();
@@ -197,9 +200,23 @@ function Login({ onLogin }: { onLogin: (actor: Actor) => void }) {
   );
 }
 const menuDefinitions = [
+  { key: '/', label: '问题与风险', symbol: '◈', permissions: ['data.read', 'event.read'] },
   {
-    key: '/',
-    label: '工作台',
+    key: '/monitoring',
+    label: '监控对象',
+    symbol: '▤',
+    permissions: ['data.read', 'asset.onboard'],
+  },
+  { key: '/metrics', label: '指标看板', symbol: '▥', permissions: ['data.read'] },
+  {
+    key: '/inspection-settings',
+    label: '巡检设置',
+    symbol: '◷',
+    permissions: ['investigation.create'],
+  },
+  {
+    key: '/operations',
+    label: '原有运维工作台',
     symbol: '◈',
     permissions: ['data.read', 'data.read', 'platform.read'],
   },
@@ -246,7 +263,7 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
   const can = useCan();
   const location = useLocation();
   const [search, setSearch] = useSearchParams();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => initialSidebarCollapsed(window.innerWidth));
   const [refresh, setRefresh] = useState(0);
   const [rolling, setRolling] = useState(false);
   const [logoutError, setLogoutError] = useState<unknown>();
@@ -296,7 +313,7 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
     return () => clearInterval(interval);
   }, [rolling, setSearch]);
   useEffect(() => {
-    if (location.pathname.match(/^\/(investigations|evidence|events|knowledge)\/.+/))
+    if (location.pathname.match(/^\/(issues|investigations|evidence|events|knowledge)\/.+/))
       setRolling(false);
   }, [location.pathname]);
   const setFilter = (key: string, value?: string) =>
@@ -348,15 +365,37 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
             selectedKeys={[
               location.pathname.startsWith('/assets')
                 ? '/assets'
-                : location.pathname.startsWith('/admin')
-                  ? '/admin'
-                  : '/' + location.pathname.split('/')[1],
+                : location.pathname.startsWith('/issues')
+                  ? '/'
+                  : location.pathname.startsWith('/admin')
+                    ? '/admin'
+                    : '/' + location.pathname.split('/')[1],
             ]}
-            items={nav.map((item) => ({
-              key: item.key,
-              icon: <span aria-hidden>{item.symbol}</span>,
-              label: <ContextLink to={item.key}>{item.label}</ContextLink>,
-            }))}
+            items={[
+              ...nav
+                .filter((item) =>
+                  ['/', '/monitoring', '/metrics', '/inspection-settings'].includes(item.key),
+                )
+                .map((item) => ({
+                  key: item.key,
+                  icon: <span aria-hidden>{item.symbol}</span>,
+                  label: <ContextLink to={item.key}>{item.label}</ContextLink>,
+                })),
+              {
+                key: 'workflows',
+                label: '调查与管理',
+                icon: <span aria-hidden>≋</span>,
+                children: nav
+                  .filter(
+                    (item) =>
+                      !['/', '/monitoring', '/metrics', '/inspection-settings'].includes(item.key),
+                  )
+                  .map((item) => ({
+                    key: item.key,
+                    label: <ContextLink to={item.key}>{item.label}</ContextLink>,
+                  })),
+              },
+            ]}
           />
           {!collapsed && (
             <div className="sidebar-footer">
@@ -373,7 +412,7 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
               <Button type="text" aria-label="切换导航" onClick={() => setCollapsed((v) => !v)}>
                 ☰
               </Button>
-              <span className="workspace-name">数据库运维工作区</span>
+              <span className="workspace-name">DB Evidence · 智能巡检与问题诊断</span>
               <Tag className="internal-tag">内部</Tag>
             </div>
             <Space>
@@ -446,7 +485,9 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
             </div>
             <div className="timebar">
               <Space wrap>
-                <span className="filter-label">时间</span>
+                <span className="filter-label">
+                  {location.pathname.startsWith('/issues/') ? '指标查询时间' : '时间'}
+                </span>
                 <label className="datetime-label">
                   起始{' '}
                   <input
@@ -499,7 +540,12 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
               <Alert type="warning" showIcon title="时间窗无效：起始时间须早于结束时间。" />
             ) : null}
             <Routes>
-              <Route path="/" element={<Overview />} />
+              <Route path="/" element={<IntelligenceHome />} />
+              <Route path="/issues/:id" element={<IssueReport />} />
+              <Route path="/monitoring" element={<Monitoring />} />
+              <Route path="/metrics" element={<MetricsDashboard />} />
+              <Route path="/inspection-settings" element={<InspectionSettings />} />
+              <Route path="/operations" element={<Overview />} />
               <Route path="/assets" element={<AssetList />} />
               <Route path="/assets/new" element={<Onboarding />} />
               <Route path="/assets/onboarding/:draftId" element={<Onboarding />} />

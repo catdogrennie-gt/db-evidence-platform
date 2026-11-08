@@ -205,7 +205,13 @@ export function ExplainEvidenceView({ data }: { data: Row }) {
   );
 }
 
-function StatementRefs({ data }: { data: unknown }) {
+function StatementRefs({
+  data,
+  onMetricReference,
+}: {
+  data: unknown;
+  onMetricReference?: (reference: string) => void;
+}) {
   const refs = strings(data);
   return refs.length ? (
     <Space wrap size={[4, 4]} className="statement-refs">
@@ -214,6 +220,10 @@ function StatementRefs({ data }: { data: unknown }) {
           <ContextLink key={ref} to={`/evidence/${ref}`}>
             <Tag>证据 {ref.slice(0, 8)}</Tag>
           </ContextLink>
+        ) : ref.startsWith('manifest:') && onMetricReference ? (
+          <Button key={ref} type="link" size="small" onClick={() => onMetricReference(ref)}>
+            查看冻结时序证据 ↗
+          </Button>
         ) : (
           <Tag key={ref}>
             {ref.startsWith('manifest:') ? '冻结指标 · ' + ref.slice(9, 17) : ref}
@@ -228,11 +238,13 @@ function Statements({
   data,
   empty,
   kind,
+  onMetricReference,
 }: {
   title: string;
   data: unknown;
   empty: string;
   kind?: string;
+  onMetricReference?: (reference: string) => void;
 }) {
   const entries = Array.isArray(data) ? data : typeof data === 'string' ? [data] : [];
   return (
@@ -244,12 +256,25 @@ function Statements({
             const item = object(value);
             return (
               <li key={index}>
+                {kind === 'finding' && (
+                  <Tag>
+                    {(
+                      {
+                        locks: '锁与事务',
+                        sql: 'SQL',
+                        host: '主机',
+                        network: '网络',
+                        correlation: '跨证据关联',
+                      } as Record<string, string>
+                    )[text(item.category)] ?? '未分类发现'}
+                  </Tag>
+                )}
                 <Typography.Paragraph className="prose">
                   {typeof value === 'string'
                     ? value
                     : text(item.statement ?? item.description ?? item.summary)}
                 </Typography.Paragraph>
-                <StatementRefs data={item.evidence_ids} />
+                <StatementRefs data={item.evidence_ids} onMetricReference={onMetricReference} />
                 {strings(item.refutations).length > 0 && (
                   <Typography.Paragraph type="secondary">
                     反证与限制：{strings(item.refutations).join('；')}
@@ -257,6 +282,11 @@ function Statements({
                 )}
                 {kind === 'hypothesis' && (
                   <Typography.Text type="secondary">候选解释，需人工核验。</Typography.Text>
+                )}
+                {kind === 'finding' && (
+                  <Typography.Text type="secondary">
+                    待人工核验，尚未证实；不代表根因或业务影响已确认。
+                  </Typography.Text>
                 )}
               </li>
             );
@@ -268,7 +298,13 @@ function Statements({
     </section>
   );
 }
-export function InvestigationReportView({ data }: { data: unknown }) {
+export function InvestigationReportView({
+  data,
+  onMetricReference,
+}: {
+  data: unknown;
+  onMetricReference?: (reference: string) => void;
+}) {
   const report = object(data);
   if (!Object.keys(report).length)
     return (
@@ -278,28 +314,56 @@ export function InvestigationReportView({ data }: { data: unknown }) {
     );
   return (
     <Card title="调查结论与依据">
-      <Statements title="已观察事实" data={report.facts} empty="报告未返回已观察事实。" />
+      <Statements
+        title="已观察事实"
+        data={report.facts}
+        empty="报告未返回已观察事实。"
+        onMetricReference={onMetricReference}
+      />
+      {Array.isArray(report.findings) && report.findings.length > 0 && (
+        <Statements
+          title="待核验发现"
+          data={report.findings}
+          kind="finding"
+          empty="报告未提出待核验发现。"
+          onMetricReference={onMetricReference}
+        />
+      )}
       <Statements
         title="候选原因"
         data={report.hypotheses}
         kind="hypothesis"
-        empty="报告未提出候选原因。"
+        onMetricReference={onMetricReference}
+        empty={
+          Array.isArray(report.findings) && report.findings.length > 0
+            ? '未另列候选原因，请结合上方待核验发现核对。'
+            : '报告未提出候选原因。'
+        }
       />
       <Statements
         title="未知项与资料限制"
         data={report.unknowns}
+        onMetricReference={onMetricReference}
         empty="报告未单独列出未知项；仍需核对来源覆盖。"
       />
       {Array.isArray(report.refutations) && report.refutations.length > 0 && (
-        <Statements title="反证" data={report.refutations} empty="" />
+        <Statements
+          title="反证"
+          data={report.refutations}
+          empty=""
+          onMetricReference={onMetricReference}
+        />
       )}
       <Statements
         title="建议的下一步只读检查"
         data={report.next_readonly_checks}
+        onMetricReference={onMetricReference}
         empty="报告未返回下一步检查。"
       />
       <Typography.Paragraph type="secondary">
-        冻结指标引用可在下方“引用证据”打开；报告不会将缺失采样补为零。
+        {onMetricReference
+          ? '点击段落中的冻结时序引用查看原始窗口；缺失采样保留断点。'
+          : '冻结指标引用可在下方“引用证据”打开；报告不会将缺失采样补为零。'}
       </Typography.Paragraph>
       <RawDetails data={data} label="查看报告结构与版本资料" />
     </Card>

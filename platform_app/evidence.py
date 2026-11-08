@@ -285,10 +285,10 @@ def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, 
         },
     }
     if config is not None:
-        from .metrics import materialize_metric_window
+        from .metrics import materialize_source_windows
 
         try:
-            frozen_metrics = materialize_metric_window(config, ids, start, end)
+            frozen_metrics = materialize_source_windows(db, config, ids, start, end)
         except PlatformError as exc:
             frozen_metrics["coverage"]["reason_codes"] = [exc.detail["code"]]
     versions = list(
@@ -298,20 +298,31 @@ def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, 
             .with_for_update()
         )
     )
-    evidence = list(
-        db.scalars(
-            select(Evidence)
-            .where(
-                Evidence.instance_id.in_(ids),
-                Evidence.source_mode == "live",
-                Evidence.observed_at >= start,
-                Evidence.observed_at < end,
-            )
-            .order_by(Evidence.observed_at.desc(), Evidence.id.desc())
-            .limit(1001)
-            .with_for_update()
-        )
-    )
+    # Select by diagnostic layer before the global bound: a chatty metric source
+    # must not evict all older SQL/log snapshots or the baseline from a report.
+    predicates = [Evidence.instance_id.in_(ids), Evidence.source_mode == "live", Evidence.observed_at >= start, Evidence.observed_at < end]
+    groups = list(db.execute(select(Evidence.instance_id, Evidence.source, func.count()).where(*predicates).group_by(Evidence.instance_id, Evidence.source).order_by(Evidence.instance_id, Evidence.source).limit(101)))
+    source_group_truncated = len(groups) > 100
+    groups = groups[:100]
+    quota = max(2, 1000 // max(len(groups), 1))
+    selected = {}
+    evidence_total = sum(row[2] for row in groups)
+    for instance_id, source, count in groups:
+        query = select(Evidence).where(*predicates, Evidence.instance_id == instance_id, Evidence.source == source)
+        baseline = db.scalar(query.order_by(Evidence.observed_at, Evidence.id).limit(1).with_for_update())
+        reserved={baseline.id:baseline} if baseline else {}
+        if source=='mysql.lock_waits':
+            # Reserve a real nonempty snapshot before recent healthy samples
+            # consume this layer's quota. Keep the global 1000-item limit.
+            sqlite=db.get_bind().dialect.name=='sqlite'
+            length=func.json_array_length(Evidence.payload,'$.rows') if sqlite else func.json_length(Evidence.payload,'$.rows')
+            row_type=func.json_type(Evidence.payload,'$.rows') if sqlite else func.json_type(func.json_extract(Evidence.payload,'$.rows'))
+            availability=Evidence.coverage['availability'].as_string()
+            representative=db.scalar(query.where(length>0,row_type==('array' if sqlite else 'ARRAY'),or_(availability.is_(None),availability.in_(['available','unknown','degraded']))).order_by(Evidence.observed_at.desc(),Evidence.id.desc()).limit(1).with_for_update())
+            if representative: reserved[representative.id]=representative
+        newest = list(db.scalars(query.order_by(Evidence.observed_at.desc(), Evidence.id.desc()).limit(quota-len(reserved)).with_for_update()))
+        for row in newest + list(reserved.values()): selected[row.id] = row
+    evidence = sorted(selected.values(), key=lambda row: (row.observed_at, row.id), reverse=True)[:1000]
     frames = list(
         db.scalars(
             select(MetricFrame)
@@ -325,7 +336,7 @@ def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, 
             .with_for_update()
         )
     )
-    bounded_truncation = len(evidence) > 1000 or len(frames) > 1000
+    bounded_truncation = source_group_truncated or evidence_total > len(evidence) or len(frames) > 1000
     evidence, frames = evidence[:1000], frames[:1000]
     metric_coverage = frozen_metrics["coverage"]
     source_gaps = sorted(
@@ -387,7 +398,7 @@ def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, 
         window_end=end,
         sources=sorted({item.source for item in evidence})
         + ["metric_frames"]
-        + (["prometheus_resampled"] if metric_coverage.get("materialized") else [])
+        + (sorted({item.get("source", "prometheus_resampled") for item in frozen_metrics["items"]}) if metric_coverage.get("materialized") else [])
         + ([] if payload["coverage_complete"] else ["materialization_partial"]),
         manifest_sha256=digest(payload),
         retain_until=utcnow() + timedelta(days=retain_days),
@@ -427,7 +438,7 @@ def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, 
             ManifestItem(
                 manifest_id=manifest.id,
                 instance_id=item["instance_id"],
-                item_type="prometheus_window",
+                item_type="time_series_window" if item.get("source") == "zabbix_history" else "prometheus_window",
                 payload=item,
                 payload_sha256=digest(item),
             )

@@ -1,8 +1,8 @@
 # Windows 本地部署与运维
 
-本指南部署新平台，不依赖旧实验 runtime/config.json、固定目标、VM、SSH 账号或模型密钥。真实测量来自个人隔离实验，不代表生产采用。验收状态见 [06-acceptance-status.md](06-acceptance-status.md)。
+本指南部署独立平台，包含原 MySQL 直采与新增 Zabbix 自动巡检，不依赖旧实验 runtime/config.json、固定目标、VM、SSH 账号或模型密钥。真实测量来自个人隔离实验，不代表生产采用。新增链路见[本轮实际验收](../acceptance-zabbix.md)，原平台记录见 [06-acceptance-status.md](06-acceptance-status.md)。
 
-当前本机平台的 API/UI 端口为 **18080**，独立控制 MySQL **13306**，Prometheus **9090**，采集 worker 指标桥 **9120**。浏览器入口以私密配置的 public_origin 为准。旧 start.ps1 的 8765 实验应用不是本平台入口。目标地址、UUID、口令及私密报告不写入本指南。
+新部署生成器的默认 API/UI 端口为 **18080**，独立控制 MySQL **13306**，Prometheus **9090**，采集 worker 指标桥 **9120**；并行运行时须选择自己的不冲突配置。浏览器入口以私密配置的 public_origin 为准。旧 start.ps1 的 8765 实验应用不是本平台入口。目标地址、UUID、口令及私密报告不写入本指南。
 
 ## 1. 软件和目录
 
@@ -36,6 +36,14 @@ $env:DBA_PLATFORM_CONFIG = $platformConfig
 可在生成时提供 --control-port、--api-port、--prometheus-port、--bridge-port；四端口必须不同。默认仅回环绑定，无 SSH、目标和模型外发配置。更改 public_origin 不是公网部署方案；远程访问需要另行完成 TLS、反向代理、身份与网络设计。
 
 生成器在写凭据前将新目录 ACL 限为当前 Windows SID 与 SYSTEM，子目录继承；拒绝仓库内路径、指向仓库的路径以及**任何已有目标目录，包括空目录**。没有覆盖/重置开关。ACL 失败会停止，留下的未完成目录不会自动接管，检查后换新目录重试。
+
+### 新旧版本并行时的目录与服务归属
+
+保留旧源码及其匹配运行目录，在另一个 checkout / worktree、虚拟环境和私密配置中验证新版。新版至少使用独立控制 schema、配置、密钥与凭据目录、日志、PID、导出和应用端口；不要把旧库路径复制成新库，也不要用空平台初始化覆盖原运行数据。
+
+若在同一个已核验 MySQL 服务上建立独立 schema，服务本身仍由其原管理配置负责。新版只管理自己的 API / 采集 / AI 进程，不拿新版 ConfigPath 启停另一环境的 MySQL；Prometheus 服务及 TSDB 也必须有明确归属。完全独立部署则使用自己的数据目录与端口。始终显式传 `-ConfigPath`，不要在并行环境依赖脚本的默认私密目录。
+
+新部署生成自己的主密钥；恢复旧数据必须使用与该备份匹配的原密钥，二者不是同一个操作。历史源码回溯见[已发布历史版本](../releases/legacy-platform-2026.11.08.md)。新版迁移、测试或停启不应改变旧环境的 PID、数据文件和配置。
 
 ## 2. 生成物与权限
 
@@ -111,9 +119,21 @@ Remove-Item -LiteralPath (Join-Path $platformPrivate 'mysql-first-start.sql')
 
 ## 4. 显式迁移、身份初始化与启动
 
+本轮迁移在原控制库结构上增加来源及巡检记录，不另建身份或分析数据库：
+
+| Revision | 内容 |
+| --- | --- |
+| `0005_monitoring` | `monitoring_sources`、`monitoring_mappings`；外部对象 UUID 可未知，原直连注册仍做身份验证 |
+| `0006_inspection` | `inspection_policies`、`inspection_dispatches`、`inspection_findings`；关联原用户、实例、事件、调查与任务 |
+
+在目标运行目录的私密配置已核对、控制 schema 已选定后，显式设置配置再迁移。以下不打印配置或数据库口令：
+
 ~~~powershell
+$env:DBA_PLATFORM_CONFIG = $platformConfig
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini current
 .\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini upgrade head
 if ($LASTEXITCODE -ne 0) { throw 'Migration failed; do not start application workers.' }
+.\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini current
 .\.venv\Scripts\python.exe -m platform_app.bootstrap --config $platformConfig --plan (Join-Path $platformPrivate 'bootstrap-plan.json') --output (Join-Path $platformPrivate 'bootstrap-identifiers.json')
 if ($LASTEXITCODE -ne 0) { throw 'Bootstrap failed.' }
 .\scripts\platform\manage.ps1 -Action Start -Services prometheus,api,worker,ai -ConfigPath $platformConfig
@@ -122,7 +142,11 @@ if ($LASTEXITCODE -ne 0) { throw 'Bootstrap failed.' }
 
 API 不自动迁移或创建用户，bootstrap 不重置已有用户密码。管理员先建组织/系统/用户，按业务范围授权，再接入目标。不要为展示便利给管理员补全局业务权限。空平台不会从旧实验自动发现目标。
 
+本轮 head 为 `0006_inspection`。实际独立新 schema 已迁移到此版本并通过 readiness；全部旧数据形态的原位升级尚未逐项验证。已有环境升级先执行第 6 节的恢复点与停写流程，不重新运行空库初始化。`downgrade` 可能删除巡检记录，且外部对象未知 UUID 会限制 `0005` 回退；恢复旧源码不等于安全回退数据结构。
+
 监控连接不应使用旧实验 operator/root。远端直连验证证书和主机身份；SSH 先人工核验 known_hosts，主机和日志路径由私密 profile 允许。平台不创建目标用户、GRANT、业务库、DDL 或开启日志，缺权限应显示缺口。模型默认空配置，系统默认 rules_only；启用外部模型还需私密供应商配置、系统/实例策略及用户明确授权。AI 不执行建议 SQL，人工方案、审批、执行记录和复核分别留存。
+
+Zabbix 路径在“监控对象”连接只读来源、限制允许主机组、发现并选择已有对象，再在“巡检设置”保存当前负责人的授权对象及策略。无需提供目标 MySQL 口令。确认来源实际成功时间、对象能力与有效历史后再解释结果；模板名或保存成功提示不证明锁 / SQL / 日志已经存在。详细步骤见[操作指南](../user-guide.md)。
 
 ## 5. 健康、日志和安全启停
 
@@ -161,3 +185,5 @@ P0 为 Windows 单机本机入口，未承诺高可用、互联网发布或生�
 ~~~
 
 第一条仅在临时目录验证模板，不启动服务。SQLite、mock、inline 适配器不是后台运行证明。真实 MySQL 并发/迁移检查需显式配置/开关；真实故障、模型外发和目标写操作各自需要批准的隔离范围，不能从“运行测试”推导授权。
+
+本轮真实来源、四身份 HTTP、冻结窗口、新 schema、双事务及多进程派发结果见[验收矩阵](../acceptance-zabbix.md)。其中正常模型周期完成与真实故障模型分析通过分别记录，SQL epoch 缺失时不把累计摘要当成已验证的窗口延迟。

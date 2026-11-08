@@ -65,7 +65,7 @@ class SecretStore:
         return self.directory / f"{ref}.fernet"
 
     def put_secret(self, value: object, purpose: str = "database") -> SecretRef:
-        if purpose not in ("database", "model", "ssh", "explain_parameter"):
+        if purpose not in ("database", "model", "ssh", "explain_parameter", "zabbix"):
             raise ValueError("Unsupported secret purpose")
         cipher, key_id = self._key()
         ref = str(uuid4())

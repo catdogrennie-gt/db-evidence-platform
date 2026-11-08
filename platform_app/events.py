@@ -322,6 +322,14 @@ def _rule_input(db, instance, rule, run_id, now, kind):
         "source": "target_observation",
         "evidence_ids": [],
     }
+    # External objects have explicitly selected logical collectors. A host/probe
+    # cannot fail a MySQL core collector it never had or was not meant to run.
+    mysql_rule = rule.template in ('locks_present','sql_latency') or collector == 'identity_status'
+    if (mysql_rule and instance.engine != 'mysql') or (
+        instance.connection_mode == 'zabbix' and (schedule is None or not schedule.enabled)
+    ):
+        result.update(source='configured_capability',reason='rule_not_applicable',engine=instance.engine)
+        return 'not_applicable',result,now
     if rule.template in ("collector_stale", "collector_unreachable"):
         if kind == "observation":
             run = db.get(m.CollectionRun, run_id)
@@ -329,7 +337,7 @@ def _rule_input(db, instance, rule, run_id, now, kind):
                 return None
         source_query = select(m.Evidence).where(
             m.Evidence.instance_id == instance.id,
-            m.Evidence.source == "mysql.global_status",
+            m.Evidence.source == ("mysql.global_status" if collector == "identity_status" else "linux.host"),
             m.Evidence.source_mode == "live",
             m.Evidence.coverage["collector"].as_string() == collector,
         )
@@ -353,7 +361,7 @@ def _rule_input(db, instance, rule, run_id, now, kind):
             and latest_run.status in ("failed", "partial")
             and (last_at is None or latest_run.started_at >= last_at)
         )
-        base = last_at or instance.created_at
+        base = last_at or (schedule.created_at if instance.connection_mode == 'zabbix' and schedule else instance.created_at)
         age = max(0, (now - base).total_seconds()) if base else None
         result.update(
             source="platform_clock" if kind == "clock_tick" else "collection_run",
@@ -370,6 +378,9 @@ def _rule_input(db, instance, rule, run_id, now, kind):
         )
         if age is None:
             return "unknown", result, now
+        if instance.connection_mode == 'zabbix' and latest_run is None and age < max(300, interval * 3):
+            result['reason']='awaiting_first_scheduled_observation'
+            return 'unknown',result,now
         if age >= interval * float(p.get("stale_intervals", 3)):
             return "firing", result, now
         return ("normal" if result["recovery_observation"] else "unknown"), result, now
@@ -455,6 +466,22 @@ def _apply_condition(db, instance, rule, evaluation, condition, result, observed
         )
         .with_for_update()
     )
+    if condition == 'not_applicable':
+        # Keep the erroneous historical episode and its evidence. This is a
+        # scope correction, not a fabricated successful recovery observation.
+        if active:
+            previous = active.state
+            active.state,active.pending_since,active.last_evaluated_at='not_applicable',None,now
+            episode=db.get(m.AlertOccurrence,active.current_occurrence_id) if active.current_occurrence_id else None
+            if episode and episode.status != 'not_applicable':
+                episode.status='not_applicable'
+                episode.evidence=dict(episode.evidence,latest=result)
+                db.add(m.AlertTransition(occurrence_id=episode.id,evaluation_id=evaluation.id,from_state=previous,to_state='not_applicable',occurred_at=now,details=result))
+                for event in db.scalars(select(m.Event).join(m.EventAlert,m.EventAlert.event_id==m.Event.id).where(m.EventAlert.alert_occurrence_id==episode.id,m.Event.status.notin_(['closed','merged']))):
+                    event.closure_type='not_applicable'
+                    event.closure_reason='规则不适用于该对象的引擎或已配置采集能力；保留历史记录，不代表观测到健康恢复。'
+                    _transition(db,event,'rule_not_applicable',evaluation_id=evaluation.id,to_state='closed',details=result)
+        return
     if not active:
         active = m.ActiveAlert(
             instance_id=instance.id,

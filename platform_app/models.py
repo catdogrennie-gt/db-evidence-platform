@@ -154,7 +154,7 @@ class Instance(IDMixin, TimestampMixin, Base):
     endpoint: Mapped[str] = mapped_column(String(255))
     port: Mapped[int] = mapped_column(default=3306)
     connection_mode: Mapped[str] = mapped_column(String(20), default="direct")
-    expected_server_uuid: Mapped[str] = mapped_column(String(64), unique=True)
+    expected_server_uuid: Mapped[str | None] = mapped_column(String(64), unique=True)
     credential_ref: Mapped[str | None] = mapped_column(String(36))
     credential_version: Mapped[int] = mapped_column(default=1)
     ssh_profile_ref: Mapped[str | None] = mapped_column(String(120))
@@ -753,3 +753,84 @@ for _table in Base.metadata.tables.values():
     _table.dialect_options["mysql"]["engine"] = "InnoDB"
     _table.dialect_options["mysql"]["charset"] = "utf8mb4"
     _table.dialect_options["mysql"]["collate"] = "utf8mb4_0900_ai_ci"
+
+
+class MonitoringSource(IDMixin, TimestampMixin, Base):
+    __tablename__ = "monitoring_sources"
+    name: Mapped[str] = mapped_column(String(120))
+    url: Mapped[str] = mapped_column(String(1000))
+    system_id: Mapped[str] = mapped_column(ForeignKey("systems.id"))
+    secret_ref: Mapped[str] = mapped_column(String(36))
+    allowed_host_group_ids: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(30), default="unknown")
+    last_success_at: Mapped[datetime | None] = mapped_column(UTC)
+    error_code: Mapped[str | None] = mapped_column(String(80))
+    __table_args__ = (Index("ix_monitoring_source_system", "system_id"),)
+
+
+class MonitoringMapping(IDMixin, TimestampMixin, Base):
+    __tablename__ = "monitoring_mappings"
+    source_id: Mapped[str] = mapped_column(ForeignKey("monitoring_sources.id"))
+    hostid: Mapped[str] = mapped_column(String(80))
+    instance_id: Mapped[str] = mapped_column(ForeignKey("instances.id"), unique=True)
+    layer: Mapped[str] = mapped_column(String(20), default="db")
+    selected: Mapped[bool] = mapped_column(default=True)
+    items: Mapped[list] = mapped_column(JSON, default=list)
+    capabilities: Mapped[list] = mapped_column(JSON, default=list)
+    relationships: Mapped[dict] = mapped_column(JSON, default=dict)
+    version: Mapped[int] = mapped_column(default=1)
+    last_observed_at: Mapped[datetime | None] = mapped_column(UTC)
+    __table_args__ = (UniqueConstraint("source_id", "hostid"),)
+
+
+class InspectionPolicy(IDMixin, TimestampMixin, Base):
+    __tablename__ = "inspection_policies"
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id"), unique=True)
+    version: Mapped[int] = mapped_column(default=1)
+    enabled: Mapped[bool] = mapped_column(default=False)
+    instance_ids: Mapped[list] = mapped_column(JSON, default=list)
+    signal_interval_seconds: Mapped[int] = mapped_column(default=300)
+    ai_interval_seconds: Mapped[int] = mapped_column(default=1800)
+    urgent_enabled: Mapped[bool] = mapped_column(default=True)
+    cooldown_seconds: Mapped[int] = mapped_column(default=300)
+    max_daily_runs: Mapped[int] = mapped_column(default=24)
+    mode: Mapped[str] = mapped_column(String(30), default="rules_only")
+    external_confirmed: Mapped[bool] = mapped_column(default=False)
+    next_signal_at: Mapped[datetime] = mapped_column(UTC, default=utcnow)
+    next_ai_at: Mapped[datetime] = mapped_column(UTC, default=utcnow)
+    last_dispatched_at: Mapped[datetime | None] = mapped_column(UTC)
+    last_completed_at: Mapped[datetime | None] = mapped_column(UTC)
+    status: Mapped[str] = mapped_column(String(40), default="idle")
+    reason: Mapped[str | None] = mapped_column(String(160))
+    __table_args__ = (Index("ix_inspection_policy_due", "enabled", "next_signal_at", "next_ai_at"),)
+
+
+class InspectionDispatch(IDMixin, TimestampMixin, Base):
+    __tablename__ = "inspection_dispatches"
+    policy_id: Mapped[str] = mapped_column(ForeignKey("inspection_policies.id"))
+    policy_version: Mapped[int]
+    dispatch_key: Mapped[str] = mapped_column(String(64), unique=True)
+    trigger: Mapped[str] = mapped_column(String(30))
+    event_id: Mapped[str | None] = mapped_column(ForeignKey("events.id"))
+    instance_ids: Mapped[list] = mapped_column(JSON, default=list)
+    investigation_id: Mapped[str] = mapped_column(ForeignKey("investigations.id"), unique=True)
+    task_id: Mapped[str] = mapped_column(ForeignKey("tasks.id"))
+    status: Mapped[str] = mapped_column(String(30), default="queued")
+    __table_args__ = (Index("ix_inspection_dispatch_day", "policy_id", "created_at"),)
+
+
+class InspectionFinding(IDMixin, TimestampMixin, Base):
+    __tablename__ = "inspection_findings"
+    instance_id: Mapped[str] = mapped_column(ForeignKey("instances.id"))
+    category: Mapped[str] = mapped_column(String(50))
+    dimension: Mapped[str] = mapped_column(String(80))
+    fingerprint: Mapped[str] = mapped_column(String(64), unique=True)
+    event_id: Mapped[str] = mapped_column(ForeignKey("events.id"), unique=True)
+    kind: Mapped[str] = mapped_column(String(20), default="current")
+    evidence_ids: Mapped[list] = mapped_column(JSON, default=list)
+    calculation: Mapped[dict] = mapped_column(JSON, default=dict)
+    signal_hash: Mapped[str | None] = mapped_column(String(64))
+    dispatched_hash: Mapped[str | None] = mapped_column(String(64))
+    last_dispatched_at: Mapped[datetime | None] = mapped_column(UTC)
+    latest_investigation_id: Mapped[str | None] = mapped_column(ForeignKey("investigations.id"))
+    __table_args__ = (Index("ix_inspection_findings_instance", "instance_id", "updated_at"),)

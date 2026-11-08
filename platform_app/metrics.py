@@ -347,7 +347,14 @@ def mask_series(series, start, end, step, definition):
 
 
 def query_template(actor, instance_id, template, from_time, to_time, step=30, config=None):
-    scoped_instance(actor, instance_id)
+    instance = scoped_instance(actor, instance_id)
+    if instance.connection_mode == "zabbix":
+        from .monitoring import metric_charts
+        charts = metric_charts(actor.db, instance, from_time, to_time, config or actor.db.info.get("platform_config") or load_config())
+        match = next((c for c in charts if c["template"] == template), None)
+        if match is None:
+            raise PlatformError(422, "unknown_metric_template", "指标未绑定到该监控对象。")
+        return match
     definition = METRIC_TEMPLATES.get(template)
     if definition is None:
         raise PlatformError(422, "unknown_metric_template", "指标模板不在服务端注册表中。")
@@ -479,3 +486,48 @@ def query_template(actor, instance_id, template, from_time, to_time, step=30, co
         "requested_step_seconds": step,
         **result,
     }
+
+
+# External registry entries remain numeric and retain their logical permission owner.
+for _key, _owner, _unit in (
+    ("host_cpu_percent", "host", "%"),
+    ("host_disk_read_bytes_per_second", "host", "Bps"),
+    ("host_disk_write_bytes_per_second", "host", "Bps"),
+    ("probe_latency_ms", "host", "ms"),
+    ("probe_availability", "host", ""),
+):
+    METRIC_TEMPLATES[_key] = MetricDefinition(_key, _owner, _key, _unit, "external", "tdx_" + _key)
+
+
+def materialize_source_windows(db, config, instance_ids, start, end):
+    """One bounded snapshot contract, provider provenance retained per item."""
+    from .models import Instance
+    from .monitoring import metric_charts
+    external, direct = [], []
+    for instance in db.scalars(select(Instance).where(Instance.id.in_(instance_ids))):
+        (external if instance.connection_mode == "zabbix" else direct).append(instance)
+    result = materialize_metric_window(config, [r.id for r in direct], start, end) if direct else {"items": [], "coverage": {"materialized": True, "complete": True, "reason_codes": []}}
+    for instance in external:
+        try:
+            charts = metric_charts(db, instance, start, end, config)
+        except PlatformError as exc:
+            charts = []
+            result["coverage"]["reason_codes"].append(exc.detail["code"])
+        from .monitoring import mapping_for
+        mapping=mapping_for(db,instance.id)
+        relationships=[]
+        if mapping and (mapping.relationships or {}).get("parent_hostid"):
+            from .models import MonitoringMapping
+            parent=db.scalar(select(MonitoringMapping).where(MonitoringMapping.source_id==mapping.source_id, MonitoringMapping.hostid==mapping.relationships["parent_hostid"], MonitoringMapping.instance_id.in_(instance_ids)))
+            if parent: relationships=[{"from":parent.instance_id,"to":instance.id,"kind":"registered","evidence_ids":[],"relationship":"监控配置声明的关联，不代表因果","provenance":"zabbix.host.tags.sl.parent"}]
+        for chart in charts: chart["registered_relationships"]=relationships
+        result["items"].extend(charts)
+        if not charts or any(not c["coverage"]["complete"] for c in charts):
+            result["coverage"]["complete"] = False
+            result["coverage"]["reason_codes"].append("external_history_partial")
+    if len(result["items"]) > 192 or len(json.dumps(result, ensure_ascii=False).encode()) > 2_000_000 or sum(len(i.get("points", [])) for i in result["items"]) > 10000:
+        return {"items": [], "coverage": {"materialized": False, "complete": False, "reason_codes": ["source_window_budget_exceeded"]}}
+    names={instance.id:instance.name for instance in external+direct}
+    for item in result["items"]: item["object_name"]=names.get(item.get("instance_id"), "unknown")
+    result["coverage"]["reason_codes"] = sorted(set(result["coverage"]["reason_codes"]))
+    return result

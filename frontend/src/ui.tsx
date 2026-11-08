@@ -481,10 +481,12 @@ export function Chart({
   option,
   height = 300,
   onClick,
+  label = '基于服务端资料绘制的图表',
 }: {
   option: EChartsOption;
   height?: number;
   onClick?: (params: Row) => void;
+  label?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -499,14 +501,7 @@ export function Chart({
       chart.dispose();
     };
   }, [option, onClick]);
-  return (
-    <div
-      ref={ref}
-      style={{ height, width: '100%' }}
-      role="img"
-      aria-label="基于服务端真实资料绘制的图表"
-    />
-  );
+  return <div ref={ref} style={{ height, width: '100%' }} role="img" aria-label={label} />;
 }
 export function RelationshipGraph({ nodes, edges }: { nodes: Row[]; edges: Row[] }) {
   const ids = new Set(nodes.map((n) => text(n.id)));

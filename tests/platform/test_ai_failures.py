@@ -423,3 +423,50 @@ def test_deepseek_final_json_budget_disables_default_thinking(ai_env):
 
     result = run_investigation(ai_env["factory"], lease, config, model_client=provider)
     assert result.status == "completed"
+
+
+@pytest.mark.parametrize('triggered',[True,False])
+def test_lock_observation_and_counterevidence_survive_initial_context_pressure(ai_env,monkeypatch,triggered):
+    """A real trigger ID is not permission to cite an omitted observation."""
+    import json
+    from datetime import timedelta
+    from platform_app import evidence as evidence_module
+    from platform_app import models as m
+    from platform_app.common import iso
+    from platform_app.investigations import run_investigation
+    from tests.platform.test_intelligence import policy_env
+    from platform_app.tools import DIGEST_FIELDS
+
+    e=ai_env;p=policy_env(e);p.mode='live_redacted';p.external_confirmed=True;e['db'].commit()
+    for source,payload in [
+        ('mysql.global_status',{'rows':[{'VARIABLE_NAME':'Threads_connected','VARIABLE_VALUE':5}]}),
+        ('mysql.statement_digest',{'rows':[dict({key:12345 for key in DIGEST_FIELDS},DIGEST=str(index)*64,DIGEST_TEXT='SELECT * FROM example WHERE id = ?') for index in range(8)]}),
+    ]:
+        e['db'].add(m.Evidence(instance_id=e['a'].id,run_id=e['evidence'].run_id,source=source,observed_at=e['end']-timedelta(seconds=1),coverage={'availability':'available','complete':True},payload=payload,payload_sha256='a'*64))
+    for stamp in (e['start']+timedelta(seconds=1),e['end']-timedelta(seconds=1)):
+        e['db'].add(m.Evidence(instance_id=e['a'].id,run_id=e['evidence'].run_id,source='mysql.lock_waits',observed_at=stamp,coverage={'availability':'available','complete':True},payload={'rows':[]},payload_sha256='a'*64))
+    e['db'].commit()
+    marker={'policy_id':p.id,'version':p.version,'signals':[{'category':'lock_wait','kind':'current','instance_id':e['a'].id,'evidence_ids':[e['evidence'].id],'calculation':{'row_count':1}}]}
+    row,task,lease,config=prepared_run(e,**({'inspection':marker} if triggered else {}))
+    row.question='automatic comprehensive inspection';e['db'].commit()
+    original=evidence_module.create_manifest
+    def with_frozen_metrics(*args,**kwargs):
+        manifest=original(*args,**kwargs)
+        db=args[0]
+        for index in range(5):
+            db.add(m.ManifestItem(manifest_id=manifest.id,instance_id=e['a'].id,item_type='time_series_window',payload={'template':'host_cpu_percent','owner_collector':'host','source':'zabbix_history','unit':'%','points':[{'time':iso(e['start']),'value':10+index,'validity':'valid'}],'coverage':{'complete':True}},payload_sha256='a'*64))
+        db.flush();return manifest
+    monkeypatch.setattr(evidence_module,'create_manifest',with_frozen_metrics)
+    calls=[]
+    def provider(config,payload,timeout):
+        calls.append(payload)
+        return provider_response(e['evidence'].id)
+    result=run_investigation(e['factory'],lease,config,model_client=provider)
+    assert result.status=='completed' and len(calls)==1, result.report
+    payload=calls[0];initial=json.loads(payload['messages'][1]['content'])
+    actual={item['evidence_id']:item for item in initial['evidence']}
+    signal_refs={ref for signal in initial['inspection_signals'] for ref in signal['evidence_ids']}
+    assert signal_refs.issubset(actual)
+    assert e['evidence'].id in actual and actual[e['evidence'].id]['data']['rows'][0]['blocking_trx_id']==13
+    assert any(item['source']=='mysql.lock_waits' and item['data']['row_count']==0 and item['observed_at']>actual[e['evidence'].id]['observed_at'] for item in actual.values())
+    assert len(json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode())+512<=9000

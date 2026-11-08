@@ -22,6 +22,7 @@ from .db import create_db_engine, create_session_factory, utcnow
 from .evidence import purge_expired
 from .events import clock_tick, ensure_default_rules
 from .metrics_bridge import start_bridge
+from .secrets import SecretUnavailable
 from .models import (
     CollectionRun,
     CollectionSchedule,
@@ -392,6 +393,12 @@ def execute(factory, lease, config):
         if lease.type == "connection_test":
             return handle_connection_test(factory, lease, config)
         if lease.type in ("activate_instance", "collect_instance"):
+            with factory() as db:
+                external = db.get(Instance, lease.instance_id)
+                external = external is not None and external.connection_mode == "zabbix"
+            if external:
+                from .monitoring import handle_collection as handle_monitoring
+                return handle_monitoring(factory, lease, config)
             return handle_collection(factory, lease, config)
         if lease.type == "verification":
             from .remediation import handle_verification
@@ -422,6 +429,23 @@ def execute(factory, lease, config):
             if isinstance(exc, PlatformError)
             else getattr(exc, "code", "task_failed")
         )
+        # Task lifecycle, budgets and internal bugs do not describe upstream health.
+        retrieval_failure = isinstance(exc, SecretUnavailable) or (
+            isinstance(exc, PlatformError)
+            and code in {"monitoring_upstream_unavailable", "monitoring_credential_unavailable"}
+        )
+        if lease.type in ("collect_instance", "activate_instance") and retrieval_failure:
+            try:
+                with factory.begin() as db:
+                    check_fence(db, lease, config_revision=lease.payload.get("config_revision"))
+                    from .monitoring import mapping_for
+                    from .models import MonitoringSource
+                    mapping = mapping_for(db, lease.instance_id)
+                    if mapping:
+                        source = db.get(MonitoringSource, mapping.source_id)
+                        source.status, source.error_code = "failed", "monitoring_collection_failed"
+            except PlatformError:
+                pass  # An obsolete result cannot overwrite current source health.
         fail(factory, lease, code)
         LOG.error(
             "Task failed type=%s id=%s error_type=%s code=%s",
@@ -478,6 +502,8 @@ def serve(config, *, once=False, no_bridge=False):
             while not stopped.is_set():
                 try:
                     schedule_due(factory)
+                    from .intelligence import dispatch_due
+                    dispatch_due(factory)
                     maintenance.tick()
                     reconcile_interrupted(factory)
                     for future in list(futures):

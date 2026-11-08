@@ -12,8 +12,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       locale={zhCN}
       theme={{
         token: {
-          colorPrimary: '#176d5c',
-          colorInfo: '#176d5c',
+          colorPrimary: '#326bd1',
+          colorInfo: '#326bd1',
           colorBgLayout: '#f3f5f7',
           colorText: '#253448',
           colorTextSecondary: '#758294',
@@ -22,8 +22,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           fontSize: 13,
         },
         components: {
-          Layout: { headerBg: '#ffffff', siderBg: '#12312e' },
-          Menu: { darkItemBg: '#12312e', darkItemSelectedBg: '#25544c', darkItemColor: '#bbcec9' },
+          Layout: { headerBg: '#ffffff', siderBg: '#162944' },
+          Menu: { darkItemBg: '#162944', darkItemSelectedBg: '#29466d', darkItemColor: '#b9cae1' },
           Card: { headerFontSize: 15 },
         },
       }}
