@@ -203,6 +203,7 @@ SQL 摘要的累计计数、窗口差分和生命周期最大值含义不同；�
 ## 文档与历史
 
 - [联合对象上手](docs/analysis-groups-guide.md)：官方监控、host / item / 标签选择、权限、稀疏历史和巡检。
+- [官方模板与诊断扩展准备](docs/zabbix-official-setup.md)：Agent 2、只读账号、TLS、三项固定诊断查询和真实历史核对。
 - [操作指南](docs/user-guide.md)：接入、策略、报告、指标和异常处理。
 - [安装与运行](docs/platform/07-operations.md)：私密目录、初始化、迁移、启停与升级。
 - [联合对象验收](docs/acceptance-analysis-groups.md)：官方采集、精确范围、权限、页面、真实模型输入、受控锁核查与本轮回归。
