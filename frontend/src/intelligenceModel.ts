@@ -109,6 +109,130 @@ export interface MonitoringSource {
   error_code?: string;
   has_token: boolean;
 }
+export interface ZabbixTag { tag: string; value: string }
+export interface ZabbixItem {
+  hostid: string;
+  host_name: string;
+  host_tags?: ZabbixTag[];
+  itemid: string;
+  name: string;
+  key: string;
+  units: string;
+  value_type: string | number;
+  description?: string;
+  tags: ZabbixTag[];
+  status: string | number;
+  state: string | number;
+  error?: string;
+  lastclock?: string | number | null;
+  value_kind: 'numeric' | 'text' | 'log' | 'unsupported';
+  selectable?: boolean;
+  enhancement?: string | null;
+  history_semantics?: string;
+  heartbeat_seconds?: number | null;
+  poll_interval?: number | null;
+}
+export interface AnalysisRelation {
+  from_hostid: string;
+  to_hostid: string;
+  kind: 'runs_on' | 'depends_on' | 'connects_to' | 'related_to';
+  label?: string;
+}
+export interface AnalysisGroup {
+  id: string;
+  instance_id: string;
+  name: string;
+  description: string;
+  source_id: string;
+  source_name: string;
+  system_id: string;
+  enabled: boolean;
+  config_revision: number;
+  version: number;
+  status: string;
+  last_observed_at?: string | null;
+  item_count: number;
+  host_count: number;
+  value_kind_counts: Partial<Record<ZabbixItem['value_kind'], number>>;
+  items: ZabbixItem[];
+  hosts: Array<{ hostid: string; name: string; tags: ZabbixTag[] }>;
+  relations: AnalysisRelation[];
+  interval_seconds: number;
+}
+export interface AnalysisGroupInput {
+  name: string;
+  source_id: string;
+  description: string;
+  items: Array<{ hostid: string; itemid: string }>;
+  relations: AnalysisRelation[];
+  enabled: boolean;
+  interval_seconds: number;
+  config_revision?: number;
+}
+export function analysisSelectionKey(item: Pick<ZabbixItem, 'hostid' | 'itemid'>): string {
+  return `${item.hostid}:${item.itemid}`;
+}
+export function updateAnalysisSelection(previous: ZabbixItem[], page: ZabbixItem[], keys: string[]): ZabbixItem[] {
+  const unique = [...new Set(keys)];
+  if (unique.length > 32) throw new Error('每个联合分析对象最多选择 32 个监控项');
+  const known = new Map([...previous, ...page].map(item => [analysisSelectionKey(item), item]));
+  if (unique.some(key => !known.has(key))) throw new Error('监控项已变化，请重新加载后选择');
+  return unique.map(key => known.get(key)!);
+}
+export function analysisGroupPayload(values: Row, selected: ZabbixItem[], relations: AnalysisRelation[]): AnalysisGroupInput {
+  if (!selected.length || selected.length > 32) throw new Error('请选择 1 到 32 个监控项');
+  if (new Set(selected.map(analysisSelectionKey)).size !== selected.length) throw new Error('请移除重复监控项');
+  const hosts = new Set(selected.map(item => item.hostid));
+  if (relations.some(relation => !hosts.has(relation.from_hostid) || !hosts.has(relation.to_hostid)))
+    throw new Error('关系两端必须属于已选监控项的主机');
+  if (!String(values.name ?? '').trim() || !values.source_id) throw new Error('请填写对象名称并选择来源');
+  return {
+    name: String(values.name).trim(), source_id: String(values.source_id),
+    description: String(values.description ?? '').trim(),
+    items: selected.map(({ hostid, itemid }) => ({ hostid, itemid })),
+    relations: relations.map(({ from_hostid, to_hostid, kind, label }) => ({ from_hostid, to_hostid, kind, label: label?.trim() ?? '' })),
+    enabled: values.enabled !== false,
+    interval_seconds: Number(values.interval_seconds ?? 60),
+    ...(typeof values.config_revision === 'number' ? { config_revision: values.config_revision } : {}),
+  };
+}
+export function analysisItemStatus(item: ZabbixItem, nowSeconds = Date.now() / 1000): { label: string; color: string } {
+  if (String(item.status) === '1') return { label: '上游已停用', color: 'default' };
+  if (String(item.state) === '1') return { label: '采集不支持', color: 'error' };
+  if (item.value_kind === 'unsupported') return { label: '不参与数值分析', color: 'default' };
+  const clock = Number(item.lastclock);
+  if (!Number.isFinite(clock) || clock <= 0) return { label: '尚无采样', color: 'warning' };
+  if (nowSeconds - clock > 900) return { label: '采样较早', color: 'warning' };
+  return { label: '已采样', color: 'blue' };
+}
+export function analysisGroupReadyLabel(lastObservedAt: string | null | undefined): string {
+  return lastObservedAt ? '已获得有效观察' : '等待有效观察';
+}
+export function analysisHistoryCoverage(coverage: Row): { label: string; reasons: string[] } {
+  const labels: Record<string, string> = {
+    history_truncated: '达到历史条数上限', history_byte_budget: '达到历史大小上限',
+    value_truncated: '部分文本值已截断', item_unavailable: '监控项当前不可用',
+    no_samples: '当前窗口没有历史样本', unsupported_value_type: '暂不支持此值类型',
+    invalid_value: '包含无效数值', invalid_history_row: '包含无效历史记录',
+    sample_interval_unverified: '采样周期待核对',
+    sparse_history_no_value_change_or_missing: '仅变化 / 心跳记录；无新历史不等于采集失败，也不能据此补写当前值',
+  };
+  const reasons = Array.isArray(coverage.reason_codes) ? coverage.reason_codes.map(String).map(reason => labels[reason] ?? reason) : [];
+  return {
+    label: coverage.complete === true && !coverage.truncated ? '覆盖完整' : coverage.complete === false || coverage.truncated ? '覆盖不完整' : '覆盖未知',
+    reasons,
+  };
+}
+export function metricSamplingSummary(coverage?: Row): string | null {
+  const sampling = coverage?.sampling;
+  if (!sampling || typeof sampling !== 'object') return null;
+  const data = sampling as Row;
+  const original = Number(data.original_point_count);
+  const retained = Number(data.retained_point_count);
+  if (!Number.isSafeInteger(original) || !Number.isSafeInteger(retained) || original < 1 || retained < 0 || retained > original) return null;
+  const method = data.method === 'original_point_bucket_minmax' ? '桶极值抽样' : '有界抽样';
+  return `保留 ${retained} / ${original} 个原始点（${method}）；曲线未展示全部原始采样。`;
+}
 export interface DiscoveredHost {
   hostid: string;
   name: string;

@@ -12,7 +12,8 @@ const server = await createServer({
 });
 after(() => server.close());
 const { InvestigationReportView } = await server.ssrLoadModule('/src/Presentation.tsx');
-const { ReportFreshnessNotice } = await server.ssrLoadModule('/src/Intelligence.tsx');
+const { ReportFreshnessNotice, MetricPanel } = await server.ssrLoadModule('/src/Intelligence.tsx');
+const { SourceCoverage } = await server.ssrLoadModule('/src/ui.tsx');
 const evidenceId = '11111111-1111-4111-8111-111111111111';
 const itemId = '22222222-2222-4222-8222-222222222222';
 const instanceId = '33333333-3333-4333-8333-333333333333';
@@ -23,6 +24,47 @@ const emptyReport = {
   refutations: [],
   next_readonly_checks: [],
 };
+
+test('frozen chart prominently discloses retained original point counts', () => {
+  const markup = renderToStaticMarkup(createElement(MetricPanel, { frozen: true, data: {
+    id: 'host:item', title: 'Linux / CPU', source: 'zabbix_history', unit: '%',
+    window: { from: '2026-11-09T01:00:00Z', to: '2026-11-09T02:00:00Z' },
+    points: [{ time: '2026-11-09T01:00:00Z', value: 5 }], gaps: [],
+    coverage: { complete: false, truncated: true, sampling: { method: 'original_point_bucket_minmax', original_point_count: 1000, retained_point_count: 200 } },
+  } }));
+  assert.match(markup, /保留 200 \/ 1000 个原始点/);
+  assert.match(markup, /桶极值抽样/);
+  assert.match(markup, /未展示全部原始采样/);
+});
+
+test('coverage gaps show readable reasons and a time range without exposing object JSON', () => {
+  const markup = renderToStaticMarkup(createElement(SourceCoverage, { data: {
+    source: 'zabbix_history', coverage: { complete: false }, gaps: [
+      { from: '2026-11-09T01:00:00Z', to: '2026-11-09T01:02:00Z', reason: 'missing_samples' },
+      { reason: 'sparse_history_no_value_change_or_missing' },
+    ],
+  } }));
+  assert.match(markup, /缺失采样/);
+  assert.match(markup, /2026-11-09T01:00:00Z/);
+  assert.match(markup, /按变化或心跳记录/);
+  assert.match(markup, /无新记录不等于采集失败/);
+  assert.doesNotMatch(markup, /&quot;from&quot;|&quot;reason&quot;|missing_samples|sparse_history_no_value_change_or_missing/);
+  assert.doesNotMatch(markup, /覆盖完整/);
+});
+
+test('repeated gaps are counted and sparse coverage survives an empty chart gaps array', () => {
+  const repeated = renderToStaticMarkup(createElement(SourceCoverage, { data: {
+    coverage: { complete: true },
+    gaps: Array.from({ length: 50 }, (_, i) => ({ from: `sample-${i}`, reason: 'missing_samples' })),
+  } }));
+  assert.match(repeated, /缺失采样（50 处）/);
+  assert.doesNotMatch(repeated, /sample-49|覆盖完整/);
+  const sparse = renderToStaticMarkup(createElement(SourceCoverage, { data: {
+    gaps: [], coverage: { complete: false, reason_codes: ['sparse_history_no_value_change_or_missing', 'custom_reason'] },
+  } }));
+  assert.match(sparse, /按变化或心跳记录/);
+  assert.match(sparse, /其他缺口（custom_reason）/);
+});
 
 function render(report, onMetricReference) {
   return renderToStaticMarkup(

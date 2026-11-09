@@ -1061,7 +1061,8 @@ function AiPolicies() {
                     'error_log',
                     'slow_log',
                     'host',
-                  ].map((value) => ({ value, label: value }))}
+                    'monitoring',
+                  ].map((value) => ({ value, label: value === 'monitoring' ? '联合监控数据（monitoring）' : value }))}
                 />
               </Form.Item>
               <Required name="reason" label="修改理由与脱敏核对" area />

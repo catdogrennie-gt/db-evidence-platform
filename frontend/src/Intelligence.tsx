@@ -28,6 +28,7 @@ import {
   prioritizeIssueCharts,
   prioritizeIssueNodes,
   compactIssueNodes,
+  metricSamplingSummary,
   visibleGraph,
 } from './intelligenceModel';
 import type {
@@ -334,6 +335,7 @@ const metricNames: Record<string, string> = {
 };
 export function MetricPanel({ data, frozen = false }: { data: MetricChartData; frozen?: boolean }) {
   const points = chartData(data.points ?? []);
+  const sampling = metricSamplingSummary(data.coverage);
   const option = useMemo<EChartsOption>(
     () => ({
       color: ['#316dd3', '#a47d30'],
@@ -421,6 +423,7 @@ export function MetricPanel({ data, frozen = false }: { data: MetricChartData; f
         <Empty description="此窗口没有有效采样；不补零、不推断健康" />
       )}
       <SourceCoverage data={{ source: data.source, coverage: data.coverage, gaps: data.gaps }} />
+      {sampling && <Alert type="info" showIcon title="曲线已抽样" description={sampling} className="intel-gap-banner" />}
       <details className="intel-details">
         <summary>查看样本明细与缺口</summary>
         <div className="intel-sample-table">
@@ -805,7 +808,7 @@ export function IssueReport() {
                     data.analysis_objects.map((object) => (
                       <Tag key={object.id}>
                         {object.name} ·{' '}
-                        {{ mysql: '数据库', host: '主机', network: '网络探针' }[object.engine] ??
+                        {{ mysql: '数据库', host: '主机', network: '网络探针', analysis: '联合分析对象' }[object.engine] ??
                           object.engine}
                       </Tag>
                     ))

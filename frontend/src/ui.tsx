@@ -259,6 +259,28 @@ export function FieldGrid({ data, fields }: { data: Row; fields: [string, string
     />
   );
 }
+const coverageReasonLabels: Record<string, string> = {
+  missing_samples: '缺失采样', no_samples: '当前窗口没有历史样本',
+  invalid_value: '包含无效数值', invalid_history_row: '包含无效历史记录',
+  item_unavailable: '监控项当前不可用', unsupported_value_type: '暂不支持此值类型',
+  sample_interval_unverified: '采样周期待核对', history_truncated: '达到历史条数上限',
+  history_byte_budget: '达到历史大小上限', value_truncated: '部分文本值已截断',
+  sparse_history_no_value_change_or_missing: '按变化或心跳记录；无新记录不等于采集失败',
+  point_budget_exceeded: '超出样本数量预算', byte_budget_exceeded: '超出数据大小预算',
+  unknown_gap: '缺口原因未说明',
+};
+function coverageGapReason(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object') {
+    const gap = value as Row;
+    if (typeof gap.reason === 'string') return gap.reason;
+    if (typeof gap.code === 'string') return gap.code;
+  }
+  return 'unknown_gap';
+}
+function gapEntries(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : value == null ? [] : [value];
+}
 export function SourceCoverage({ data }: { data?: Row }) {
   if (!data)
     return (
@@ -270,10 +292,22 @@ export function SourceCoverage({ data }: { data?: Row }) {
       />
     );
   const coverage = (data.coverage ?? {}) as Row;
-  const rawGaps = data.gaps ?? coverage.gaps ?? coverage.reason_codes;
-  const gaps = Array.isArray(rawGaps)
-    ? rawGaps.filter((v) => !text(v).endsWith(':not_applicable') && text(v) !== 'not_applicable')
-    : rawGaps;
+  const rawGaps = [gapEntries(data.gaps), gapEntries(coverage.gaps)].find(items => items.length) ?? [];
+  const existingReasons = new Set(rawGaps.map(coverageGapReason));
+  const gaps = [...rawGaps, ...gapEntries(coverage.reason_codes).filter(value => !existingReasons.has(coverageGapReason(value)))]
+    .filter(value => { const reason = coverageGapReason(value); return reason !== 'not_applicable' && !reason.endsWith(':not_applicable'); });
+  const reasons = new Map<string, { count: number; from?: unknown; to?: unknown }>();
+  for (const value of gaps) {
+    const reason = coverageGapReason(value);
+    const previous = reasons.get(reason);
+    if (previous) previous.count += 1;
+    else {
+      const gap = value && typeof value === 'object' ? value as Row : {};
+      reasons.set(reason, { count: 1, from: gap.from, to: gap.to });
+    }
+  }
+  const summaries = [...reasons.entries()];
+  const complete = coverage.complete === true && !coverage.truncated && gaps.length === 0;
   return (
     <div className="source-line">
       <Space wrap>
@@ -293,14 +327,17 @@ export function SourceCoverage({ data }: { data?: Row }) {
           </span>
         ) : null}
         {data.freshness || data.quality ? <Status value={data.freshness ?? data.quality} /> : null}
-        {coverage.complete !== undefined ? (
-          <Tag color={coverage.complete ? 'success' : 'warning'}>
-            {coverage.complete ? '覆盖完整' : '覆盖不完整'}
+        {coverage.complete !== undefined || coverage.truncated || gaps.length > 0 ? (
+          <Tag color={complete ? 'success' : 'warning'}>
+            {complete ? '覆盖完整' : '覆盖不完整'}
           </Tag>
         ) : null}
-        {Array.isArray(gaps) && gaps.length > 0 ? (
+        {summaries.length > 0 ? (
           <Typography.Text type="warning">
-            缺口：{gaps.map((v) => text(v)).join('、')}
+            缺口：{summaries.slice(0, 3).map(([reason, gap], index) => <span key={reason}>
+              {index > 0 ? '；' : ''}{coverageReasonLabels[reason] ?? `其他缺口（${reason.slice(0, 80)}）`}
+              {gap.count > 1 ? `（${gap.count} 处）` : gap.from || gap.to ? <>（<Time value={gap.from} /> — <Time value={gap.to} />）</> : null}
+            </span>)}{summaries.length > 3 ? `；另 ${summaries.length - 3} 类缺口，展开明细查看` : ''}
           </Typography.Text>
         ) : null}
       </Space>

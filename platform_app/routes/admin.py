@@ -1119,7 +1119,7 @@ def model_policies(actor: ActorContext = Depends(current_actor)):
                     "mode": row.model_policy,
                     "version": row.policy_version,
                     "source_policy_configured": configured is not None,
-                    "allowed_sources": value.get("allowed_sources", sorted(COLLECTORS)),
+                    "allowed_sources": value.get("allowed_sources", sorted(set(COLLECTORS) | {'monitoring'})),
                 }
             )
     return {"items": items, "default": "rules_only", "raw_external_use": False}
@@ -1151,8 +1151,9 @@ def update_model_policy(body: dict = Body(...), actor: ActorContext = Depends(cu
         raise PlatformError(409, "policy_changed", "策略版本已变化。")
     # Allowed source metadata is stored for stricter worker checks; never implicitly grants external_use.
     _, existing = _setting(actor.db, f"model_policy:{kind}:{identifier}")
-    allowed = body.get("allowed_sources", existing.get("allowed_sources", sorted(COLLECTORS)))
-    if not isinstance(allowed, list) or any(source not in COLLECTORS for source in allowed):
+    model_sources = set(COLLECTORS) | {'monitoring'}
+    allowed = body.get("allowed_sources", existing.get("allowed_sources", sorted(model_sources)))
+    if not isinstance(allowed, list) or any(source not in model_sources for source in allowed):
         raise PlatformError(422, "invalid_sources", "资料类别无效。")
     row.model_policy = mode
     row.policy_version += 1

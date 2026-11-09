@@ -45,6 +45,10 @@ LOCK_FIELDS = {
     "PROCESSLIST_ID",
     "PROCESSLIST_TIME",
 }
+IDENTITY_FIELDS = {
+    'waiting_trx_id','blocking_trx_id','waiting_thread_id','blocking_thread_id',
+    'TRX_ID','TRX_MYSQL_THREAD_ID','THREAD_ID','PROCESSLIST_ID',
+}
 DIGEST_FIELDS = {
     "COUNT_STAR",
     "SUM_TIMER_WAIT",
@@ -112,17 +116,25 @@ class ToolArguments(BaseModel):
     to_time: str | None = Field(default=None, alias="to")
     limit: int = Field(default=30, ge=1, le=100)
     evidence_ids: list[str] | None = Field(default=None, max_length=100)
+    manifest_item_ids: list[str] | None = Field(default=None,max_length=32)
 
 
 def tool_definitions(names=None):
-    schema = ToolArguments.model_json_schema(by_alias=True)
+    # The same verbose generated schema repeated per tool used to evict real
+    # evidence. Keep the exact validation contract without titles/defaults.
+    schema = {'type':'object','additionalProperties':False,'required':['instance_id'],'properties':{
+        'instance_id':{'type':'string'},'from':{'type':'string'},'to':{'type':'string'},
+        'limit':{'type':'integer','minimum':1,'maximum':100},
+        'evidence_ids':{'type':'array','items':{'type':'string'},'maxItems':100},
+        'manifest_item_ids':{'type':'array','items':{'type':'string'},'maxItems':32},
+    }}
     return [
         {
             "type": "function",
             "function": {
                 "name": name,
-                "description": "Read only already-frozen historical evidence; missing observations are unknown.",
-                "parameters": schema,
+                "description": "Read authorized frozen evidence. Missing is unknown; metric windows accept exact manifest_item_ids.",
+                "parameters": dict(schema,properties={key:value for key,value in schema['properties'].items() if (key!='manifest_item_ids' or name=='get_metric_window') and (key!='evidence_ids' or name!='get_metric_window')}),
             },
         }
         for name in TOOL_SOURCES
@@ -148,8 +160,29 @@ def code(value, default="unknown"):
     )
 
 
+def _identity_value(value):
+    """Identity is not a measurement: never round decimal uint64s via float."""
+    if isinstance(value,bool): return None
+    if isinstance(value,str):
+        if not re.fullmatch(r'[0-9]{1,20}',value): return None
+        value=int(value)
+    elif isinstance(value,float):
+        # Already-inexact large floats cannot be reconstructed honestly.
+        if not math.isfinite(value) or not value.is_integer() or not 0<=value<=9007199254740991: return None
+        value=int(value)
+    elif not isinstance(value,int): return None
+    if not 0<=value<=18446744073709551615: return None
+    # JSON consumers commonly use IEEE doubles. Keep larger IDs as decimal text.
+    return value if value<=9007199254740991 else str(value)
+
+
 def _numeric_fields(row, keys):
-    return {key: number(row[key]) for key in keys if key in row and number(row[key]) is not None}
+    result={}
+    for key in keys:
+        if key not in row: continue
+        value=_identity_value(row[key]) if key in IDENTITY_FIELDS else number(row[key])
+        if value is not None: result[key]=value
+    return result
 
 
 def _identifier_aliaser(row):
@@ -204,7 +237,17 @@ def project_evidence(row: Evidence) -> dict:
     )
     data = {"row_count": len(raw_rows)}
     alias, aliases_available = _identifier_aliaser(row)
-    if row.source in ("mysql.lock_waits", "mysql.transactions", "mysql.sessions"):
+    if row.source.startswith('zabbix.item.'):
+        from .zabbix_items import safe_item
+        item=payload.get('item') if isinstance(payload.get('item'),dict) else {}
+        data['item']=safe_item(item)
+        if row.source.startswith('zabbix.item.numeric:') and item.get('value_kind')=='numeric':
+            data['rows']=[{'time':iso(parse_time(r['time'])),'value':number(r.get('value'))} for r in raw_rows if r.get('time') and number(r.get('value')) is not None]
+        else:
+            data['text_omitted']=True
+            data['value_kind']=item.get('value_kind') if item.get('value_kind') in ('text','log','unsupported') else 'unknown'
+            data['reason']='raw_text_not_authorized_for_external_model'
+    elif row.source in ("mysql.lock_waits", "mysql.transactions", "mysql.sessions"):
         data["rows"] = [_numeric_fields(r, LOCK_FIELDS) | _structure_fields(r, alias) for r in raw_rows]
     elif row.source == "mysql.statement_digest":
         data["rows"] = []
@@ -280,6 +323,9 @@ def project_evidence(row: Evidence) -> dict:
         }
     else:
         data["payload_omitted"] = True
+    if isinstance(payload.get('item'),dict):
+        from .zabbix_items import safe_item
+        data['item']=safe_item(payload['item'])
     coverage = row.coverage if isinstance(row.coverage, dict) else {}
     availability = code(coverage.get("availability"))
     if availability not in ("available", "degraded", "unknown"):
@@ -307,7 +353,8 @@ def project_metric_window(row, start, end):
 
     payload = row.payload or {}
     definition = METRIC_TEMPLATES.get(payload.get("template"))
-    if definition is None or payload.get("owner_collector") != definition.owner_collector:
+    generic=payload.get('template')=='zabbix_item_numeric' and payload.get('owner_collector')=='monitoring' and isinstance(payload.get('item'),dict) and payload['item'].get('value_kind')=='numeric'
+    if not generic and (definition is None or payload.get("owner_collector") != definition.owner_collector):
         return None
     points = []
     for point in payload.get("points", [])[:10000]:
@@ -334,14 +381,15 @@ def project_metric_window(row, start, end):
         else: continue
         if safe_gap not in gaps: gaps.append(safe_gap)
     truncated = original_coverage.get('truncated') is True
-    provenance = {key: value for key, value in (payload.get('provenance') or {}).items() if key in ('source_id','hostid','itemid','mapping_version','transport') and isinstance(value, (str, int))}
-    return {
+    provenance = {key: value for key, value in (payload.get('provenance') or {}).items() if key in ('source_id','hostid','itemid','mapping_version','config_revision','transport') and isinstance(value, (str, int))}
+    from .zabbix_items import safe_item,safe_text
+    result = {
         "evidence_id": "manifest:" + row.id,
         "manifest_item_id": row.id,
         "instance_id": row.instance_id,
-        "template": definition.metric_id,
-        "collector": definition.owner_collector,
-        "unit": definition.unit,
+        "template": 'zabbix_item_numeric' if generic else definition.metric_id,
+        "collector": 'monitoring' if generic else definition.owner_collector,
+        "unit": safe_text(payload.get('unit')) if generic else definition.unit,
         "source": "zabbix_history" if row.item_type == "time_series_window" else "prometheus_resampled",
         "points": points,
         "coverage": {"complete": bool(points) and not gaps and not truncated and original_coverage.get('complete') is not False, "gaps": gaps, 'truncated': truncated},
@@ -349,6 +397,17 @@ def project_metric_window(row, start, end):
         'window': {'from': iso(start), 'to': iso(end)},
         "payload_sha256": row.payload_sha256,
     }
+    if generic:
+        result['item']=safe_item(payload['item'])
+        from .zabbix_items import safe_relations
+        result['registered_relationships']=safe_relations(payload)
+        result['id']=safe_text(payload.get('id'),160)
+        result['title']=result['item'].get('host_name','')+' / '+result['item'].get('name','')
+        result['object_name']=safe_text(payload.get('object_name'))
+    if isinstance(original_coverage.get('sampling'),dict):
+        sampling={k:v for k,v in original_coverage['sampling'].items() if k in ('method','original_point_count','retained_point_count','original_valid_point_count','retained_valid_point_count','minimum_required_point_count','endpoints_preserved','gap_boundaries_preserved') and isinstance(v,(int,bool,str))}
+        result['coverage']['sampling']=sampling
+    return result
 
 
 class ToolBroker:
@@ -458,6 +517,10 @@ class ToolBroker:
                     if self.investigation.manifest_id
                     else []
                 )
+                if args.manifest_item_ids is not None:
+                    wanted=set(args.manifest_item_ids)
+                    frozen=[row for row in frozen if row.id in wanted]
+                    if wanted!={row.id for row in frozen}: raise PlatformError(404,'resource_not_found','冻结指标引用不属于本调查对象。')
                 query = select(MetricFrame).where(
                     MetricFrame.instance_id == args.instance_id,
                     MetricFrame.run_id.in_(self.metric_ids),
@@ -533,6 +596,10 @@ class ToolBroker:
             truncated = False
             for item in items:
                 item = dict(item)
+                if 'points' in item and len(json.dumps(item,ensure_ascii=False,separators=(',',':')).encode())>self.max_result_bytes:
+                    from .model_context import compact_tool_item
+                    item=compact_tool_item(item)
+                    truncated=True
                 while (
                     len(
                         json.dumps(
@@ -544,6 +611,7 @@ class ToolBroker:
                     field = "points" if "points" in item else None
                     if field and item[field]:
                         item[field] = item[field][:-1]
+                        item['coverage']=dict(item.get('coverage') or {},complete=False,truncated=True)
                         truncated = True
                     else:
                         break
@@ -561,7 +629,8 @@ class ToolBroker:
             items = limited
             audit.status = "succeeded"
             gaps = sorted(
-                {gap for item in items for gap in item.get("coverage", {}).get("gaps", [])}
+                {code(gap.get('reason_code',gap.get('reason'))) if isinstance(gap,dict) else code(gap)
+                 for item in items for gap in item.get("coverage", {}).get("gaps", [])}
             )
             if not items:
                 gaps.append("no_frozen_observations")

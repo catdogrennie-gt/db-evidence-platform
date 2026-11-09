@@ -23,6 +23,7 @@ import type { Page, Row, TaskRef } from './api';
 import { errorMessage, useCan, useResource, useScope, useScopedPath } from './hooks';
 import { ContextLink, ErrorNotice, LoadState, Status, Time, Title } from './ui';
 import { AccessNotice, CapabilityList, InspectionStatus, MetricPanel } from './Intelligence';
+import { AnalysisGroups } from './AnalysisGroups';
 import { scopeKey, selectionForScope, sourcePayload } from './intelligenceModel';
 import type {
   DiscoveredHost,
@@ -61,15 +62,16 @@ export function Monitoring() {
     (s) => !scope.system_id || s.system_id === scope.system_id,
   );
   const selectedSource = visibleSources.find((s) => s.id === sourceId);
+  const singleObjects = (resource.data?.items ?? []).filter((object) => object.engine !== 'analysis');
   return (
     <div className="intel-page">
       <Title
         title="监控对象"
-        description="接入已有 Zabbix 数据。选择对象，了解能力，再交给后台持续巡检。"
+        description="从 Zabbix 勾选相关主机和监控项，组成联合分析对象，持续观察并分析系统问题。"
         actions={
           <Space wrap>
             {can('asset.onboard') && (
-              <Button type="primary" onClick={() => setEditing('new')}>
+              <Button onClick={() => setEditing('new')}>
                 连接 Zabbix 来源
               </Button>
             )}
@@ -79,6 +81,7 @@ export function Monitoring() {
           </Space>
         }
       />
+      <AnalysisGroups sources={visibleSources} sourcesLoading={sources.loading} version={refresh} changed={resource.reload} />
       {can('asset.onboard') && (
         <Card
           className="intel-source-card"
@@ -102,7 +105,7 @@ export function Monitoring() {
                       </div>
                       <Space wrap>
                         <MonitoringStatus status={source.status} source />
-                        <Button onClick={() => setSourceId(source.id)}>选择已有对象</Button>
+                        <Button onClick={() => setSourceId(source.id)}>按单主机接入</Button>
                         <Button type="text" onClick={() => setEditing(source)}>
                           配置 / 轮换凭据
                         </Button>
@@ -131,18 +134,16 @@ export function Monitoring() {
           }}
         />
       )}
-      <div className="intel-section-head">
-        <h2>巡检范围</h2>
-        <span>{resource.data ? `${resource.data.total} 个已授权对象` : '按业务范围隔离'}</span>
-      </div>
+      <details className="analysis-single-objects">
+      <summary>单主机监控对象 · {singleObjects.length} 个已授权对象</summary>
       {!can('data.read') ? (
         <AccessNotice detail="来源配置权限与业务数据权限独立。当前身份可管理授权来源，但未获得监控对象数据读取权限。" />
       ) : (
         <LoadState {...resource} retry={resource.reload}>
           {resource.data &&
-            (resource.data.items.length ? (
+            (singleObjects.length ? (
               <div className="intel-object-grid">
-                {resource.data.items.map((object) => (
+                {singleObjects.map((object) => (
                   <Card
                     key={object.id}
                     className="intel-object-card"
@@ -185,6 +186,7 @@ export function Monitoring() {
             ))}
         </LoadState>
       )}
+      </details>
       <Alert
         className="intel-gap-banner"
         type="info"
@@ -724,7 +726,7 @@ function PolicyForm() {
                   </Form.Item>
                   <Form.Item
                     name="instance_ids"
-                    label="巡检对象"
+                    label="联合分析对象 / 监控对象"
                     rules={[
                       {
                         validator: (_, value) =>
@@ -746,7 +748,7 @@ function PolicyForm() {
                       loading={objects.loading}
                       options={(objects.data?.items ?? []).map((o) => ({
                         value: o.id,
-                        label: `${o.name} · ${o.system_name}`,
+                        label: `${o.name} · ${o.engine === 'analysis' ? '联合分析' : o.system_name}`,
                         disabled: !o.enabled,
                       }))}
                     />

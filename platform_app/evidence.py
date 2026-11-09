@@ -97,7 +97,7 @@ def append_batch(
             server_uuid=batch.get("server_uuid"),
             collector_version=collector_version,
             sensitivity="restricted"
-            if item["source"]
+            if item.get('sensitivity') == 'restricted' or item["source"].startswith(('zabbix.item.text:', 'zabbix.item.log:')) or item["source"]
             in (
                 "mysql.sessions",
                 "mysql.transactions",

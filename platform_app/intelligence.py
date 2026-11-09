@@ -486,10 +486,18 @@ def issue_detail(actor, identifier):
             if not projected: continue
             payload=item.payload or {}; metric_id='manifest:'+item.id
             object_name=payload.get('object_name') or object_names[item.instance_id]
-            chart_title=object_name+' · '+str(payload.get('template'))
-            charts.append({'id':metric_id,'instance_id':item.instance_id,'object_name':object_name,'metric_key':payload['template'],'title':chart_title,'unit':projected['unit'],'source':projected['source'],'points':projected['points'],'gaps':payload.get('gaps',[]),'window':{'from':iso(inv.window_start),'to':iso(inv.window_end)},'coverage':projected['coverage']})
-            nodes.append({'id':metric_id,'instance_id':item.instance_id,'object_name':object_name,'metric_key':payload['template'],'label':chart_title,'kind':'observed','summary':'冻结的实际指标窗口','evidence_ids':[metric_id]})
-            edges.append({'from':item.instance_id,'to':metric_id,'relationship':'指标归属','kind':'registered','evidence_ids':[metric_id],'provenance':'manifest_item.instance_id'})
+            chart_title=object_name+' · '+(projected.get('title') or str(payload.get('template')))
+            metric_key=payload['template']
+            node_label=chart_title
+            if metric_key=='zabbix_item_numeric':
+                frozen_item=payload.get('item') or {}
+                metric_key=frozen_item.get('metric_semantic') or {'dbops.mysql.lock_waits':'lock_waits'}.get(frozen_item.get('key'),metric_key)
+                node_label=str(frozen_item.get('name') or projected.get('title') or metric_key)+' · '+str(frozen_item.get('host_name') or frozen_item.get('hostid') or object_name)
+            charts.append({'id':metric_id,'instance_id':item.instance_id,'object_name':object_name,'metric_key':metric_key,'title':chart_title,'unit':projected['unit'],'source':projected['source'],'points':projected['points'],'gaps':payload.get('gaps',[]),'window':{'from':iso(inv.window_start),'to':iso(inv.window_end)},'coverage':projected['coverage']})
+            nodes.append({'id':metric_id,'instance_id':item.instance_id,'object_name':object_name,'metric_key':metric_key,'label':node_label,'kind':'observed','summary':'冻结的实际指标窗口','evidence_ids':[metric_id]})
+            from .analysis_groups import frozen_group_graph
+            owner_node=frozen_group_graph(payload,item.instance_id,nodes,edges) or item.instance_id
+            edges.append({'from':owner_node,'to':metric_id,'relationship':'指标归属','kind':'registered','evidence_ids':[metric_id],'provenance':'manifest_item.instance_id'})
             for relation in payload.get('registered_relationships',[]):
                 if not isinstance(relation,dict) or relation.get('from') not in analysis_ids or relation.get('to') not in analysis_ids or relation.get('kind')!='registered': continue
                 for object_id in (relation['from'],relation['to']):

@@ -408,13 +408,24 @@ def collect(
     row = scoped_instance(actor, identifier, "collection.trigger")
     if not row.enabled or row.lifecycle_state != "Active":
         raise PlatformError(409, "instance_not_active", "实例未激活或已停采。")
-    collectors = body.get("collectors") or body.get("collector") or ["identity_status"]
+    permitted=set(COLLECTORS)
+    defaults=['identity_status']
+    if row.connection_mode=='zabbix':
+        from ..monitoring import mapping_for
+        from ..models import MonitoringSource
+        mapping=mapping_for(actor.db,row.id)
+        source=actor.db.get(MonitoringSource,mapping.source_id) if mapping else None
+        if not mapping or not mapping.selected or not source or source.system_id!=row.system_id:
+            raise PlatformError(409,'monitoring_mapping_inactive','监控对象未绑定或映射已停用。')
+        permitted={'monitoring'} if mapping.layer=='group' else {item['collector'] for item in mapping.items}
+        defaults=sorted(permitted)
+    collectors = body.get("collectors") or body.get("collector") or defaults
     if isinstance(collectors, str):
         collectors = [collectors]
     if (
         not isinstance(collectors, list)
         or not collectors
-        or any(value not in COLLECTORS for value in collectors)
+        or any(value not in permitted for value in collectors)
     ):
         raise PlatformError(422, "invalid_collectors", "请从固定采集器中选择。")
     # One task may perform several bounded profiles sequentially for the same

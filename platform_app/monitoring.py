@@ -51,6 +51,7 @@ def get_source(actor, identifier):
 
 def save_source(actor, config, body, identifier=None):
     old = get_source(actor, identifier) if identifier else None
+    scope_changed = old is not None and 'allowed_host_group_ids' in body and set(body['allowed_host_group_ids']) != set(old.allowed_host_group_ids or [])
     system_id = body.get('system_id', old.system_id if old else None)
     authorize_system(actor, system_id, 'asset.onboard')
     url = normalize_url(body.get('url', old.url if old else ''))
@@ -69,6 +70,17 @@ def save_source(actor, config, body, identifier=None):
     if old is None:
         old = m.MonitoringSource(name=body.get('name', 'Zabbix'), url=url, system_id=system_id, secret_ref=secret)
         actor.db.add(old)
+    if scope_changed:
+        # Lock instances before any dirty source UPDATE can take its row lock.
+        # Collection holds the instance and only then updates source health.
+        identities=list(actor.db.execute(select(m.MonitoringMapping.id,m.MonitoringMapping.instance_id).where(m.MonitoringMapping.source_id==old.id)))
+        instances=list(actor.db.scalars(select(m.Instance).where(m.Instance.id.in_([r.instance_id for r in identities])).order_by(m.Instance.id).execution_options(populate_existing=True).with_for_update()))
+        mappings=list(actor.db.scalars(select(m.MonitoringMapping).where(m.MonitoringMapping.id.in_([r.id for r in identities])).order_by(m.MonitoringMapping.instance_id).execution_options(populate_existing=True).with_for_update()))
+        for instance in instances:
+            instance.config_revision+=1
+            for schedule in actor.db.scalars(select(m.CollectionSchedule).where(m.CollectionSchedule.instance_id==instance.id)):
+                schedule.config_revision=instance.config_revision
+        for mapping in mappings: mapping.version+=1
     old.name, old.url, old.system_id, old.secret_ref = body.get('name', old.name), url, system_id, secret
     old.allowed_host_group_ids = body.get('allowed_host_group_ids', old.allowed_host_group_ids or [])
     if token:
@@ -171,7 +183,7 @@ def select_hosts(actor, source, hostids, config):
         host = lookup[hostid]
         if host['binding_error']: raise PlatformError(422, host['binding_error'], '该 host 的数据库/指标身份存在歧义。')
         if not host['items']: raise PlatformError(422, 'no_supported_items', '该 host 没有受支持的实际采集项。')
-    identities = list(actor.db.execute(select(m.MonitoringMapping.id, m.MonitoringMapping.instance_id).where(m.MonitoringMapping.source_id == source.id)))
+    identities = list(actor.db.execute(select(m.MonitoringMapping.id, m.MonitoringMapping.instance_id).where(m.MonitoringMapping.source_id == source.id, m.MonitoringMapping.layer != 'group')))
     # Collection locks its instance before updating the mapping. Refresh must
     # acquire those same locks in that order, including objects being paused.
     instances = {r.id: r for r in actor.db.scalars(select(m.Instance).where(m.Instance.id.in_([row.instance_id for row in identities])).order_by(m.Instance.id).execution_options(populate_existing=True).with_for_update())}
@@ -243,6 +255,9 @@ def metric_charts(db, instance, start, end, config):
     if start >= end or end - start > timedelta(days=14): raise PlatformError(422, 'invalid_metric_window', '指标窗口最多14天且必须递增。')
     mapping = mapping_for(db, instance.id)
     if mapping is None: return []
+    if mapping.layer == 'group':
+        from .analysis_groups import group_charts
+        return group_charts(db, instance, mapping, start, end, config)
     source = db.get(m.MonitoringSource, mapping.source_id)
     client = client_for(source, config)
     charts = []
@@ -291,6 +306,9 @@ def handle_collection(factory, lease, config):
         if not mapping or not mapping.selected or lease.payload.get('config_revision') != instance.config_revision:
             raise PlatformError(409, 'monitoring_mapping_inactive', '监控映射已停用或变更。')
         source = db.get(m.MonitoringSource, mapping.source_id)
+        if mapping.layer == 'group':
+            from .analysis_groups import collect_group
+            return collect_group(db, instance, mapping, source, lease, config)
         client = client_for(source, config)
         end, start = utcnow(), utcnow() - timedelta(minutes=10)
         evidence_ids, observations = [], []
@@ -344,7 +362,7 @@ def digest_window(rows, item):
         if any(not isinstance(row, dict) or not required.issubset(row) for snapshot in snapshots for row in snapshot['rows']):
             return {**result, 'reason': 'invalid_digest_rows'}
         epochs = [p.get('counter_epoch') for p in snapshots]
-        if any(isinstance(epoch, bool) or not isinstance(epoch, (str, int)) or not str(epoch) or len(str(epoch)) > 80 for epoch in epochs):
+        if any(isinstance(epoch, bool) or not isinstance(epoch, (str, int)) or str(epoch).strip().lower() in ('', 'unknown', 'null', 'none', 'unverified') or len(str(epoch)) > 80 for epoch in epochs):
             return {**result, 'reason': 'counter_epoch_unverified'}
         if any(epoch != epochs[0] for epoch in epochs):
             return {**result, 'reason': 'counter_epoch_changed'}

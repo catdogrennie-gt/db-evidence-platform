@@ -472,6 +472,214 @@
 .intel-source-card {
   margin-bottom: 20px;
 }
+.analysis-groups {
+  margin-bottom: 28px;
+}
+.analysis-groups .intel-section-head > div {
+  min-width: 0;
+}
+.analysis-groups .intel-section-head h2 {
+  margin-bottom: 8px;
+}
+.analysis-groups .intel-section-head p {
+  margin: 0;
+  line-height: 1.8;
+}
+.analysis-group-card {
+  border-top: 3px solid #719bc8;
+}
+.analysis-group-description {
+  color: #657a91;
+  line-height: 1.8;
+  margin-top: 0;
+}
+.analysis-group-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 20px 0;
+  gap: 12px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid #edf0f6;
+}
+.analysis-group-counts > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.analysis-group-counts strong {
+  font-size: 25px;
+  color: #2d5375;
+}
+.analysis-group-counts span,
+.analysis-group-description,
+.analysis-group-editor,
+.analysis-data-summary,
+.analysis-history-meta {
+  font-size: 12px;
+}
+.analysis-host-tags {
+  margin-bottom: 16px;
+}
+.analysis-flow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  justify-content: center;
+  color: #526f8f;
+  padding: 5px 0 25px;
+}
+.analysis-empty-card > .ant-card-body > p {
+  text-align: center;
+  margin: 22px 0 0;
+}
+.analysis-single-objects {
+  margin-block: 24px;
+}
+.analysis-single-objects > summary {
+  color: #5f7189;
+  font-size: 13px;
+  font-weight: 600;
+  padding-block: 12px;
+  cursor: pointer;
+}
+.analysis-single-objects[open] > summary {
+  margin-bottom: 12px;
+}
+.analysis-group-editor .ant-steps {
+  margin-block: 24px;
+}
+.analysis-wizard-step {
+  min-height: 380px;
+  padding-top: 14px;
+}
+.analysis-wizard-step > .ant-alert,
+.analysis-wizard-step > .ant-table-wrapper,
+.analysis-wizard-step > .intel-form-pair {
+  margin-bottom: 20px;
+}
+.analysis-wizard-footer,
+.analysis-pagination,
+.analysis-review-heading,
+.analysis-relations > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.analysis-wizard-footer > span,
+.analysis-pagination > span {
+  font-size: 12px;
+  color: #7d8da2;
+}
+.analysis-item-filters {
+  display: grid;
+  grid-template-columns: auto minmax(180px, 1fr) minmax(220px, 0.8fr) auto;
+  align-items: center;
+  gap: 12px;
+  margin-block: 18px;
+}
+.analysis-filter-details {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  padding: 10px 14px;
+  border: 1px solid #edf0f6;
+  border-radius: 8px;
+}
+.analysis-filter-details > summary {
+  cursor: pointer;
+  color: #6a7d94;
+}
+.analysis-tag-filter {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr) 100px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  margin-top: 12px;
+}
+.analysis-selected-summary {
+  display: flex;
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 15px;
+  font-size: 12px;
+  color: #6f8097;
+}
+.analysis-selected-summary strong {
+  color: #315f91;
+  flex-shrink: 0;
+}
+.analysis-item-description {
+  font-size: 11px;
+  color: #73849a;
+  white-space: pre-line;
+  max-height: 85px;
+  overflow: auto;
+}
+.analysis-group-editor .ant-table code {
+  overflow-wrap: anywhere;
+}
+.analysis-pagination {
+  margin-block: 15px;
+}
+.analysis-relation-builder {
+  display: grid;
+  grid-template-columns: 1fr 110px 1fr 1fr auto;
+  gap: 10px;
+  margin-block: 24px;
+}
+.analysis-relations > div {
+  padding: 14px 0;
+  border-bottom: 1px solid #edf0f6;
+  font-size: 12px;
+}
+.analysis-review-heading {
+  padding-bottom: 16px;
+}
+.analysis-review-heading h3 {
+  margin-block: 0 8px;
+}
+.analysis-review-heading p {
+  margin: 0;
+  color: #71839a;
+}
+.analysis-data-summary,
+.analysis-history-meta {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-block: 20px;
+  color: #72839a;
+}
+.analysis-history-picker {
+  margin-block: 18px;
+}
+.analysis-history-picker > .ant-select {
+  width: 100%;
+}
+.analysis-history-value {
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 220px;
+  overflow: auto;
+  margin: 4px 0;
+}
+@media (max-width: 850px) {
+  .analysis-item-filters,
+  .analysis-relation-builder {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .analysis-tag-filter {
+    grid-template-columns: 1fr 1fr;
+  }
+  .analysis-groups .intel-section-head,
+  .analysis-wizard-footer,
+  .analysis-review-heading {
+    align-items: start;
+    flex-wrap: wrap;
+  }
+}
 .intel-source-list {
   display: grid;
   gap: 16px;
