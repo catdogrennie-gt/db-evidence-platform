@@ -834,3 +834,45 @@ class InspectionFinding(IDMixin, TimestampMixin, Base):
     last_dispatched_at: Mapped[datetime | None] = mapped_column(UTC)
     latest_investigation_id: Mapped[str | None] = mapped_column(ForeignKey("investigations.id"))
     __table_args__ = (Index("ix_inspection_findings_instance", "instance_id", "updated_at"),)
+
+class DemoControl(Base):
+    """Pre-seeded singleton. Every start, budget reservation and fence locks it."""
+    __tablename__ = 'demo_control'
+    id: Mapped[int] = mapped_column(primary_key=True)
+    current_run_id: Mapped[str | None] = mapped_column(String(36))
+    fence: Mapped[int] = mapped_column(default=0)
+    owner: Mapped[str | None] = mapped_column(String(36))
+    lease_until: Mapped[datetime | None] = mapped_column(UTC)
+    cooldown_until: Mapped[datetime | None] = mapped_column(UTC)
+    blocked: Mapped[bool] = mapped_column(default=False)
+    __table_args__ = {'mysql_engine':'InnoDB','mysql_charset':'utf8mb4','mysql_collate':'utf8mb4_0900_ai_ci'}
+
+
+class DemoRun(IDMixin, Base):
+    __tablename__ = 'demo_runs'
+    instance_id: Mapped[str] = mapped_column(ForeignKey('instances.id'))
+    requested_by: Mapped[str] = mapped_column(ForeignKey('users.id'))
+    status: Mapped[str] = mapped_column(String(30), default='requested')
+    phase: Mapped[str] = mapped_column(String(40), default='preparing')
+    fault_state: Mapped[str] = mapped_column(String(30), default='not_started')
+    started_at: Mapped[datetime] = mapped_column(UTC, default=utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column(UTC)
+    stopped_at: Mapped[datetime | None] = mapped_column(UTC)
+    fault_confirmed_at: Mapped[datetime | None] = mapped_column(UTC)
+    cleanup_started_at: Mapped[datetime | None] = mapped_column(UTC)
+    stop_requested: Mapped[bool] = mapped_column(default=False)
+    evidence_id: Mapped[str | None] = mapped_column(String(36))
+    observed_at: Mapped[datetime | None] = mapped_column(UTC)
+    investigation_id: Mapped[str | None] = mapped_column(ForeignKey('investigations.id'))
+    analysis_status: Mapped[str] = mapped_column(String(40), default='not_started')
+    ai_reserved_at: Mapped[datetime | None] = mapped_column(UTC)
+    error_code: Mapped[str | None] = mapped_column(String(80))
+    cleanup: Mapped[dict] = mapped_column(JSON, default=dict)
+    steps: Mapped[list] = mapped_column(JSON, default=list)
+    mapping_version: Mapped[int]
+    config_revision: Mapped[int]
+    source_id: Mapped[str] = mapped_column(String(36))
+    lock_itemid: Mapped[str] = mapped_column(String(80))
+    lock_hostid: Mapped[str] = mapped_column(String(80))
+    next_collection_at: Mapped[datetime | None] = mapped_column(UTC)
+    __table_args__ = (Index('ix_demo_runs_started', 'started_at'), {'mysql_engine':'InnoDB','mysql_charset':'utf8mb4','mysql_collate':'utf8mb4_0900_ai_ci'})

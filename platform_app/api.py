@@ -215,7 +215,7 @@ def create_app(config=None, session_factory=None):
             with session_factory() as db:
                 db.execute(text("SELECT 1"))
                 version = db.execute(text("SELECT version_num FROM alembic_version")).scalar()
-            if version != "0006_inspection":
+            if version != "0007_demo":
                 return JSONResponse(
                     status_code=503,
                     content={
@@ -251,6 +251,7 @@ def create_app(config=None, session_factory=None):
         "manifests",
         "monitoring",
         "intelligence",
+        "demo",
     ):
         if not (Path(__file__).parent / "routes" / f"{name}.py").is_file():
             app.state.pending_modules.append(name)

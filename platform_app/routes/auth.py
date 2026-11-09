@@ -108,13 +108,27 @@ def _rate_limit(request: Request, username: str):
         if len(history) >= 5:
             raise HTTPException(429, "Too many login attempts")
         history.append(now)
+        return key, now
+
+
+def _successful_attempt(reservation):
+    # Legitimate shared-demo visitors should not consume the failed-login cap.
+    # Remove only this request, preserving concurrent failures for the same key.
+    key, timestamp = reservation
+    with _rate_lock:
+        history = _attempts.get(key)
+        if history is not None:
+            try:
+                history.remove(timestamp)
+            except ValueError:
+                pass
 
 
 @router.post("/login")
 def login(body: LoginInput, request: Request, response: Response, db: DBSession = Depends(get_db)):
     global _dummy_hash
     require_origin(request)
-    _rate_limit(request, body.username)
+    reservation = _rate_limit(request, body.username)
     token = request.cookies.get(ANON_COOKIE_NAME, "")
     nonce = db.scalar(
         select(LoginNonce).where(LoginNonce.token_hash == token_hash(token)).with_for_update()
@@ -144,6 +158,7 @@ def login(body: LoginInput, request: Request, response: Response, db: DBSession 
         raise HTTPException(401, "Invalid username or password")
     if PASSWORD_HASHER.check_needs_rehash(user.password_hash):
         user.password_hash = PASSWORD_HASHER.hash(body.password.get_secret_value())
+    _successful_attempt(reservation)
     token, csrf_token, session = create_session(
         db, user, hours=request.app.state.config.session_hours
     )

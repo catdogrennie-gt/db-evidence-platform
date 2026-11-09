@@ -65,6 +65,7 @@ ACTION_REGISTRY = CONTROL_ACTIONS | frozenset(
         "collection.trigger",
         "task.manage",
         "lab.operate",
+        "demo.operate",
         "remediation.review",
         "remediation.record_execution",
         "maintenance.manage",

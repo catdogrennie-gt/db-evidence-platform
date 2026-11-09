@@ -107,7 +107,7 @@ QUERIES = {
         LEFT JOIN performance_schema.data_locks l
             ON l.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID
         ORDER BY w.REQUESTING_ENGINE_TRANSACTION_ID
-        LIMIT 50
+        LIMIT 51
     """,
     "statement_digest_snapshot": """
         SELECT DIGEST, SCHEMA_NAME, LEFT(DIGEST_TEXT, 500) AS DIGEST_TEXT,
@@ -147,10 +147,16 @@ try:
                 "data_lock_waits" if kind == "lock_snapshot"
                 else "events_statements_summary_by_digest"
             ),
-            "rows": rows,
+            "rows": rows[:50] if kind == "lock_snapshot" else rows,
         }
         if kind == "lock_snapshot":
-            payload.update(scope="current_observation", row_limit=50)
+            payload.update(
+                scope="current_observation", row_limit=50,
+                producer_contract="db-evidence-lock-snapshot-v2",
+                snapshot_complete=len(rows) <= 50,
+                snapshot_truncated=len(rows) > 50,
+                total_row_count=len(rows) if len(rows) <= 50 else None,
+            )
         else:
             payload.update(
                 timer_unit="picoseconds", cumulative_counters=True,
@@ -163,7 +169,9 @@ except Exception as error:
     raise SystemExit(1)
 ```
 
-`lab_orders` 是公开实验库名。实际部署应由操作者在安装时审查并修改这个固定 schema 范围；不要增加从模型、API、item key 或用户输入接收任意 SQL、schema 或 shell 的入口。两个锁查询观察的是实例当前等待；50 行锁快照及前 10 条摘要均有上限，不能当作全量语句/事务清单。
+`lab_orders` 是公开实验库名。实际部署应由操作者在安装时审查并修改这个固定 schema 范围；不要增加从模型、API、item key 或用户输入接收任意 SQL、schema 或 shell 的入口。锁查询多读一行检测截断，只返回前 50 行；摘要仍限前 10 条，不能当作全量语句/事务清单。
+
+为 `dbops.mysql.lock_snapshot` 增加 tag `sl.snapshot_contract=db-evidence-lock-snapshot-v2`，并使用上面的明确完整性字段。平台会区分“当前锁快照完整”和“历史查询窗口完整”：历史只取最近几条造成的截断缺口继续保留，不能改写成全窗口完整。固定演示只有在 tag、生产者契约、行数、来源、host/item、映射版本及时间均核对通过时才允许据此触发分析或确认监控恢复；旧输出缺少这些字段时不自动升级为完整证明。
 
 在源码之外创建 `/etc/db-evidence/mysql-monitor.json`，仅填自己的部署值。示例没有口令：
 

@@ -186,6 +186,25 @@ def frozen_group_graph(payload,instance_id,nodes,edges):
     return identity(str(item['hostid'])) if str(item.get('hostid')) in hosts else None
 
 
+def lock_snapshot_metadata(item,parsed):
+    """Verify one official snapshot without upgrading history coverage."""
+    contract='db-evidence-lock-snapshot-v2'
+    tags={t.get('tag'):t.get('value') for t in item.get('tags',[]) if isinstance(t,dict)}
+    rows=parsed.get('rows')
+    count=parsed.get('total_row_count')
+    valid=(item.get('enhancement')=='mysql.lock_waits'
+        and tags.get('sl.snapshot_contract')==contract
+        and parsed.get('producer_contract')==contract
+        and parsed.get('snapshot_complete') is True
+        and parsed.get('snapshot_truncated') is False
+        and type(count) is int and 0<=count<=50
+        and isinstance(rows,list) and len(rows)==count
+        and all(isinstance(row,dict) for row in rows))
+    return {'snapshot_contract':contract if valid else None,
+        'snapshot_complete':valid,'snapshot_truncated':not valid,
+        'snapshot_total_row_count':count if valid else None}
+
+
 def collect_group(db,instance,mapping,source,lease,config):
     from .monitoring import client_for,digest_window
     from .evidence import append_batch
@@ -212,7 +231,8 @@ def collect_group(db,instance,mapping,source,lease,config):
                 spec={'field_units':{k[14:]:v for k,v in tags.items() if k.startswith('sl.field_unit.')},'snapshot_scope':tags.get('sl.snapshot_scope')}
                 payload={'item':item,'rows':[r for r in parsed['rows'][:100] if isinstance(r,dict)],**spec,'cumulative_counters':parsed.get('cumulative_counters'),'counter_epoch':parsed.get('counter_epoch'),'scope':parsed.get('scope')}
                 if item['enhancement']=='mysql.statement_digest': payload['window']=digest_window([(parse_time(r['time']),r['value']) for r in rows],spec)
-                entries.append({'source':item['enhancement'],'observed_at':iso(stamp),'payload':payload,'sensitivity':'restricted','availability':'available' if fresh else 'stale','coverage':coverage,'truncated':coverage['truncated']})
+                snapshot_coverage={**coverage,**lock_snapshot_metadata(item,parsed)} if item['enhancement']=='mysql.lock_waits' else coverage
+                entries.append({'source':item['enhancement'],'observed_at':iso(stamp),'payload':payload,'sensitivity':'restricted','availability':'available' if fresh else 'stale','coverage':snapshot_coverage,'truncated':coverage['truncated']})
     check_fence(db,lease,config_revision=instance.config_revision)
     run.status='succeeded' if any(e['availability']=='available' for e in entries) else 'unavailable'; run.finished_at=db_now(db); run.row_count=len(entries)
     evidence_ids=append_batch(db,instance,run,{'observed_at':iso(end),'evidence_items':entries},interval_seconds=60,collector_version='zabbix-generic-1')

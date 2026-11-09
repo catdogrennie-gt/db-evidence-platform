@@ -444,6 +444,9 @@ def _bundle(db, investigation, manifest, policies=None):
     signals=[signal for signal in ((task.payload or {}).get('options',{}).get('inspection',{}).get('signals',[]) if task else [])
              if isinstance(signal,dict) and signal.get('evidence_ids') and set(signal['evidence_ids']).issubset(evidence_ids)][:16]
     trigger_ids={ref for signal in signals for ref in signal['evidence_ids']}
+    if task:
+        required=(task.payload or {}).get('options',{}).get('demo') or {}
+        if required.get('evidence_id'):trigger_ids.add(required['evidence_id'])
     # Round-robin source/asset layers, preserving both latest and baseline samples.
     buckets = {}
     for row in db.scalars(select(Evidence).where(Evidence.id.in_(evidence_ids), Evidence.observed_at >= investigation.window_start, Evidence.observed_at < investigation.window_end).order_by(Evidence.observed_at.desc(), Evidence.id).limit(1000)):
@@ -682,6 +685,59 @@ def reconcile_interrupted_investigations(session_factory):
                 call.finished_at = now
 
 
+def _demo_required_evidence(db, investigation, options, config):
+    """Only a durable controller-linked run may declare mandatory demo proof.
+
+    Generic API inputs cannot set this marker. It is still checked against the
+    persisted association, service identity, exact asset and frozen timestamps;
+    the marker grants no extra access and policy filtering still applies below.
+    """
+    from .models import DemoRun
+    run=db.scalar(select(DemoRun).where(DemoRun.investigation_id==investigation.id))
+    marker=options.get('demo')
+    if run is None and marker is None:return frozenset()
+    cfg=getattr(config,'demo',None) or {}
+    row=db.get(Evidence,run.evidence_id) if run and run.evidence_id else None
+    valid=(run is not None and isinstance(marker,dict)
+        and marker=={'run_id':run.id,'evidence_id':run.evidence_id}
+        and investigation.created_by==cfg.get('runner_user_id')
+        and run.instance_id==cfg.get('instance_id')
+        and _resource_ids(db,investigation.id)==frozenset([run.instance_id])
+        and run.ai_reserved_at is not None and row is not None
+        and row.instance_id==run.instance_id and row.source=='mysql.lock_waits'
+        and row.source_mode=='live' and row.observed_at==run.observed_at
+        and run.fault_confirmed_at is not None
+        and run.fault_confirmed_at<=row.observed_at
+        and investigation.window_start<=row.observed_at<investigation.window_end
+        and (run.cleanup_started_at is None or row.observed_at<run.cleanup_started_at)
+        and isinstance((row.payload or {}).get('rows'),list) and bool(row.payload['rows']))
+    if not valid:
+        raise PlatformError(409,'demo_required_evidence_missing','固定实验依据未通过冻结范围核对。')
+    coverage=row.coverage or {}
+    if any(coverage.get(key)!=value for key,value in {
+        'source_id':run.source_id,'hostid':run.lock_hostid,'itemid':run.lock_itemid,
+        'mapping_version':run.mapping_version,'config_revision':run.config_revision,
+        'transport':'zabbix','snapshot_contract':'db-evidence-lock-snapshot-v2',
+        'snapshot_complete':True,'snapshot_truncated':False}.items()):
+        raise PlatformError(409,'demo_required_evidence_missing','固定实验依据来源核对失败。')
+    return frozenset([row.id])
+
+
+def _require_demo_context(required_ids, context, investigation):
+    """Reference allowlists and summaries alone cannot replace actual lock data."""
+    if not required_ids:return
+    actual={item.get('evidence_id') for item in context.get('evidence',[])
+        if item.get('source')=='mysql.lock_waits'
+        and item.get('instance_id') in context.get('instance_ids',[])
+        and isinstance((item.get('data') or {}).get('rows'),list)
+        and bool(item['data']['rows'])
+        and (item.get('data') or {}).get('row_count',0)>0
+        and item.get('observed_at')
+        and any(isinstance(row,dict) and row for row in item['data']['rows'])}
+    if not required_ids.issubset(actual):
+        raise PlatformError(409,'demo_required_evidence_missing','固定实验依据未保留在实际模型输入中，未调用模型。')
+
+
 def run_investigation(session_factory, lease, config, model_client=None):
     """One claimed AI task, no automatic HTTP retries or unknown-charge replay."""
     model_client = model_client or call_model
@@ -700,6 +756,7 @@ def run_investigation(session_factory, lease, config, model_client=None):
             options = (task.payload or {}).get("options", {})
             ids = _resource_ids(db, investigation.id)
             policies = check_running(actor, investigation, task.id, mode)
+            required_ids=_demo_required_evidence(db,investigation,options,config)
             investigation.status = "preparing"
             db.commit()
             from .evidence import create_manifest
@@ -712,11 +769,13 @@ def run_investigation(session_factory, lease, config, model_client=None):
                 investigation.window_start,
                 investigation.window_end,
                 retain_days=90,
+                required_evidence_ids=required_ids,
             )
             investigation.manifest_id = manifest.id
             bundle, evidence_ids, metric_ids, cited_ids = _bundle(
                 db, investigation, manifest, policies if mode == "live_redacted" else None
             )
+            _require_demo_context(required_ids,bundle,investigation)
             investigation.input_sha256 = hashlib.sha256(
                 json.dumps(bundle, sort_keys=True, ensure_ascii=False).encode()
             ).hexdigest()
@@ -836,6 +895,7 @@ def _run_live(
     config = copy.copy(config)
     config.model = runtime
     model = config.model
+    required_ids=_demo_required_evidence(db,investigation,options,config)
     pricing = model.get("pricing", {})
     max_rounds = max(1, min(4, int(model.get("max_calls", 4))))
     max_output = max(1, min(3000, int(model.get("max_tokens", 3000))))
@@ -910,7 +970,7 @@ def _run_live(
     # string escaping. Prioritize actual lock edges before trimming initial data.
     from .model_context import compact_initial,context_refs,bounded_tool_result,refresh_snapshot_chronology,prepare_tool_context
     initial = compact_initial(bundle)
-    trigger_ids={ref for signal in initial.get('inspection_signals',[]) for ref in signal.get('evidence_ids',[])}
+    trigger_ids={ref for signal in initial.get('inspection_signals',[]) for ref in signal.get('evidence_ids',[])} | set(required_ids)
     abnormal_layers={(item.get('instance_id'),item.get('source')) for item in initial['evidence'] if item.get('selection_reason')=='nonempty_lock_snapshot'}
     latest_by_layer={}
     for item in initial['evidence']:
@@ -983,7 +1043,10 @@ def _run_live(
         input_bound = (
             len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()) + 512
         )
-        if input_bound > 24000:
+        # Valid usage has already settled prior rounds to their actual count.
+        # Compact against BOTH the per-round ceiling and the remaining total;
+        # a request below 24k can still exceed the 32k cumulative reservation.
+        if input_bound > 24000 or token_used + input_bound + max_output > 32000:
             # Keep complete assistant tool-call/result groups together. Only
             # deterministic, already-projected history is compacted; no new IO.
             last_group = next(
@@ -1039,6 +1102,9 @@ def _run_live(
             raise PlatformError(
                 409, "model_cost_budget_exhausted", "本轮最坏情况费用超过剩余预算。"
             )
+        # Verify the exact bounded user payload for EVERY round, after both
+        # initial trimming and later tool-context compaction, before charge/IO.
+        _require_demo_context(required_ids,json.loads(messages[1]['content']),investigation)
         call = ModelCall(
             investigation_id=investigation.id,
             sequence=sequence,

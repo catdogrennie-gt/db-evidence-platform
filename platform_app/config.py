@@ -30,6 +30,7 @@ class PlatformConfig(BaseModel):
     allowed_networks: list[str] = Field(default_factory=lambda: ["127.0.0.0/8", "::1/128"])
     ssh_profiles: list[dict[str, Any]] = Field(default_factory=list)
     model: dict[str, Any] = Field(default_factory=dict, repr=False)
+    demo: dict[str, Any] = Field(default_factory=dict, repr=False)
     prometheus_url: str = "http://127.0.0.1:9090"
     collection_mode: Literal["zabbix_only", "legacy"] = "zabbix_only"
     session_hours: int = Field(default=8, ge=1, le=24)
@@ -46,6 +47,9 @@ class PlatformConfig(BaseModel):
         for field in ("private_dir", "fernet_key_path", "secrets_dir", "known_hosts_path"):
             if not getattr(self, field).is_absolute():
                 raise ValueError(f"{field} must be an absolute private path")
+        from .demo import settings
+
+        settings(self)
         return self
 
     @property

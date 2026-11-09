@@ -31,6 +31,7 @@ import {
 } from './ui';
 import { HistoricalPage, RetiredPage } from './Historical';
 import { Admin } from './Admin';
+import { Demo } from './Demo';
 import { IntelligenceHome, IssueReport } from './Intelligence';
 import { MetricsDashboard, Monitoring } from './Monitoring';
 import { initialSidebarCollapsed } from './intelligenceModel';
@@ -177,7 +178,11 @@ export const menuDefinitions = [
   { key: '/monitoring', label: 'Zabbix 接入', symbol: '▤', permissions: ['data.read', 'asset.onboard'] },
   { key: '/metrics', label: '数据查看', symbol: '▥', permissions: ['data.read'] },
   { key: '/admin', label: '配置', symbol: '⚙', permissions: ['investigation.create', 'user.manage', 'grant.manage', 'group.manage', 'organization.manage', 'settings.manage', 'platform.read', 'audit.read', 'rule.manage', 'model_policy.manage'] },
+  { key: '/demo', label: '演示', symbol: '▶', permissions: ['demo.operate'] },
 ];
+export function showGlobalFilters(path: string) {
+  return path.replace(/\/+$/, '') !== '/demo';
+}
 function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
   const can = useCan();
   const location = useLocation();
@@ -217,7 +222,7 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
       );
   }, [initial, search, setSearch]);
   useEffect(() => {
-    if (!rolling) return;
+    if (!rolling || !showGlobalFilters(location.pathname)) return;
     const interval = setInterval(() => {
       setSearch(
         (p) => {
@@ -230,7 +235,7 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
       setRefresh((v) => v + 1);
     }, 30000);
     return () => clearInterval(interval);
-  }, [rolling, setSearch]);
+  }, [rolling, setSearch, location.pathname]);
   useEffect(() => {
     if (location.pathname.match(/^\/(issues|investigations|evidence|events|knowledge)\/.+/))
       setRolling(false);
@@ -323,7 +328,7 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
           </Layout.Header>
           <Layout.Content className="content">
             <ErrorNotice error={logoutError} />
-            <div className="scopebar">
+            {showGlobalFilters(location.pathname) && <><div className="scopebar">
               <Space wrap>
                 <span className="filter-label">范围</span>
                 <Select
@@ -432,12 +437,13 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
             </div>
             {new Date(scope.from) >= new Date(scope.to) ? (
               <Alert type="warning" showIcon title="时间窗无效：起始时间须早于结束时间。" />
-            ) : null}
+            ) : null}</>}
             <Routes>
               <Route path="/" element={<IntelligenceHome />} />
               <Route path="/issues/:id" element={<IssueReport />} />
               <Route path="/monitoring" element={<Monitoring />} />
               <Route path="/metrics" element={<MetricsDashboard />} />
+              <Route path="/demo" element={<Demo />} />
               <Route path="/inspection-settings" element={<ScopedRedirect to="/admin/inspection" />} />
               {['operations', 'topology', 'events', 'events/inbox', 'investigations', 'knowledge', 'tasks'].map(path => <Route key={path} path={'/' + path} element={<ScopedRedirect to="/" />} />)}
               {['assets', 'assets/new'].map(path => <Route key={path} path={'/' + path} element={<ScopedRedirect to="/monitoring" />} />)}

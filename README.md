@@ -6,7 +6,17 @@ An evidence-driven MySQL inspection and investigation platform.
 
 面向内部 DBA 与运维人员：按 host、item 和标签选择已有监控，组成持续巡检的联合对象。打开报告，先了解**发生了什么、为什么、现在怎么做**；需要核实时，再展开分析过程、冻结证据和图表。
 
-[结论优先阅读指南](docs/conclusion-first-guide.md) · [联合对象上手](docs/analysis-groups-guide.md) · [操作指南](docs/user-guide.md) · [安装与运行](docs/platform/07-operations.md)
+[公开演示指南](docs/demo-guide.md) · [结论优先阅读指南](docs/conclusion-first-guide.md) · [联合对象上手](docs/analysis-groups-guide.md) · [操作指南](docs/user-guide.md) · [安装与运行](docs/platform/07-operations.md)
+
+## 公开演示
+
+[临时演示入口](https://byte-texts-allergy-examples.trycloudflare.com/demo)：账号 **`demo`**，密码 **`EvidenceDemo-2026!`**。这是唯一有意公开的本部署专用账号；新部署仍没有默认账号或通用密码。临时地址可能变化，服务依赖演示电脑在线，不承诺持续可用。**本地链路已实测，公网 API 仍待本机操作者重载及公网验收**；状态与模型局限见[演示验收](docs/acceptance-public-demo.md)。
+
+![公开演示：固定锁等待开关、实际进度与冻结报告](docs/images/public-demo.png)
+
+进入“演示”，开启固定锁等待开关，观察实际 Zabbix 证据、分析进度与报告，再关闭并查看恢复复验。目标仅限预先核对的隔离 Lab；业务负载是合成的，Zabbix 采样是真实的，不代表生产事故或生产采用。缺数、模型失败、额度不足及恢复尚未确认都必须如实显示，不能把进度结束视为诊断或恢复成功。操作与证据边界见[演示指南](docs/demo-guide.md)。
+
+所有访客共享一轮实验：最长 **180 秒自动终止**，直接清理通过后 **600 秒冷却**；每个 **UTC 日最多 8 轮实验、4 次 AI 分析**，失败的已接受模型调用也计入额度。停止不受冷却或额度限制；浏览器关闭不会延长故障时限。
 
 ![问题分析：先查看结论、原因与建议操作](docs/images/conclusion-overview.png)
 
@@ -20,7 +30,7 @@ An evidence-driven MySQL inspection and investigation platform.
 
 **需要时直接核对数据。** 同一联合对象中的数据库与主机曲线集中查看；文本、日志及结构化历史按监控项下钻。这张图查询当前上游历史，报告中的冻结证据另行保留。
 
-## 四个入口
+## 五个入口
 
 | 入口 | 用来做什么 |
 | --- | --- |
@@ -28,10 +38,11 @@ An evidence-driven MySQL inspection and investigation platform.
 | **Zabbix 接入** `/monitoring` | 连接只读来源，选择监控项，维护联合对象 |
 | **数据查看** `/metrics` | 看当前窗口的数值曲线、类型化历史、来源与缺口 |
 | **配置** | 设置巡检、模型与外发、必要账号授权和审计 |
+| **演示** `/demo` | 在固定隔离 Lab 开启 / 关闭锁等待，观察本轮证据、报告与恢复复验 |
 
 连接来源 → 选择联合范围 → 配置后台巡检 → 阅读结论 → 按需核对证据 → 人工处置与新样本复验。配置完成后，后台运行不依赖浏览器一直打开；正常周期也保留记录，不为展示制造问题。
 
-确定性工具负责采集、计算与验证；AI 辅助关联和解释；重要处置由人员明确控制。平台不自动执行数据库变更、任意 SQL、Shell 或邮件发送。
+确定性工具负责采集、计算与验证；AI 辅助关联和解释；重要处置由人员明确控制。日常巡检不自动执行数据库变更；演示只在明确开启后执行固定隔离 Lab 事务，并回滚清理。平台不提供任意 SQL、Shell 或邮件发送能力。
 
 ## 开始使用
 
@@ -106,7 +117,7 @@ npm --prefix frontend run build
 - [结论优先指南](docs/conclusion-first-guide.md)、[操作指南](docs/user-guide.md)、[联合对象上手](docs/analysis-groups-guide.md)。
 - [官方模板与诊断扩展](docs/zabbix-official-setup.md)、[安装与运行](docs/platform/07-operations.md)、[设计与历史](docs/platform/README.md)。
 - [结论优先设计](docs/superpowers/specs/2026-11-09-conclusion-first-design.md)、[变更记录](CHANGELOG.md)、[版本索引](docs/releases/README.md)。
-- 历史版本 `legacy-platform-2026.11.08` 与 `analysis-groups-2026.11.09` 保留；本轮版本为 `conclusion-first-2026.11.09`，发布状态以版本索引为准。
+- 历史版本 `legacy-platform-2026.11.08`、`analysis-groups-2026.11.09`、`conclusion-first-2026.11.09` 保留；当前源码增加受限公开演示，发布状态以版本索引为准。
 - [原平台回溯](docs/releases/legacy-platform-2026.11.08.md)、[更早的独立实验模块](README-legacy-lab.md)。
 
 源码：`platform_app/` 后端与 worker、`frontend/` 界面、`migrations/` 迁移、`tests/platform/` 回归、`scripts/platform/` 部署与验收工具。

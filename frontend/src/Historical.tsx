@@ -21,7 +21,9 @@ export function HistoricalInvestigationReport({ data, onMetricReference }: { dat
       <Space wrap><Status value={data.mode} /><Status value={data.status} /><span>冻结窗口 <Time value={data.from} /> — <Time value={data.to} /></span></Space>
     </div>
     {!['completed', 'succeeded'].includes(String(data.status)) && <Alert type="warning" showIcon title="分析尚未成功完成" description="保留输出不能代表当前诊断已完成。" />}
-    <ExecutiveSummary report={report ?? null} mode={String(data.mode)} onMetricReference={onMetricReference} />
+    {!['completed', 'succeeded'].includes(String(data.status)) && !report?.executive_summary
+      ? <Alert type="info" showIcon title="本轮未生成结论摘要" description="原始内容按原样保留；不根据事实列表补写模型结论。" />
+      : <ExecutiveSummary report={report ?? null} mode={String(data.mode)} onMetricReference={onMetricReference} />}
     <details className="intel-details"><summary>分析过程与全部原始引用</summary><InvestigationReportView data={report ?? data.summary} onMetricReference={onMetricReference} /></details>
     <details className="intel-details"><summary>完整问题、元数据与审计</summary>
       <section className="intel-text-items"><h3>完整分析问题</h3><p className="prose">{String(data.question ?? '原记录未提供分析问题。')}</p></section>

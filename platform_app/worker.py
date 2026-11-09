@@ -494,6 +494,11 @@ def serve(config, *, once=False, no_bridge=False):
     if not no_bridge:
         bridge = start_bridge(factory, config)
     maintenance = MaintenanceRunner(factory, config)
+    demo_controller = None
+    if (getattr(config, "demo", None) or {}).get("instance_id"):
+        from .demo import DemoController
+        demo_controller = DemoController(factory, config)
+        demo_controller.start()
 
     def keepalive():
         while not stopped.is_set():
@@ -556,6 +561,8 @@ def serve(config, *, once=False, no_bridge=False):
     finally:
         stopped.set()
         thread.join(timeout=2)
+        if demo_controller is not None:
+            demo_controller.close()
         maintenance.close()
         if bridge is not None:
             bridge.shutdown()

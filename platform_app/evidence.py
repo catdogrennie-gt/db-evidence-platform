@@ -261,7 +261,7 @@ def append_batch(
     return evidence_ids
 
 
-def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, retain_days=90):
+def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, retain_days=90, *, required_evidence_ids=()):
     """Freeze a bounded historical window, including owners that never call AI.
 
     The caller authorizes the owner and all instance IDs before entering here.
@@ -305,7 +305,13 @@ def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, 
     source_group_truncated = len(groups) > 100
     groups = groups[:100]
     quota = max(2, 1000 // max(len(groups), 1))
-    selected = {}
+    required_ids=frozenset(required_evidence_ids)
+    if len(required_ids)>10:
+        raise PlatformError(422,'required_evidence_limit','必需证据数量超过限制。')
+    required_rows=list(db.scalars(select(Evidence).where(*predicates,Evidence.id.in_(required_ids)).with_for_update())) if required_ids else []
+    if {row.id for row in required_rows}!=required_ids:
+        raise PlatformError(409,'demo_required_evidence_missing','固定实验依据未包含在冻结窗口中。')
+    selected = {row.id:row for row in required_rows}
     evidence_total = sum(row[2] for row in groups)
     for instance_id, source, count in groups:
         query = select(Evidence).where(*predicates, Evidence.instance_id == instance_id, Evidence.source == source)
@@ -322,7 +328,7 @@ def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, 
             if representative: reserved[representative.id]=representative
         newest = list(db.scalars(query.order_by(Evidence.observed_at.desc(), Evidence.id.desc()).limit(quota-len(reserved)).with_for_update()))
         for row in newest + list(reserved.values()): selected[row.id] = row
-    evidence = sorted(selected.values(), key=lambda row: (row.observed_at, row.id), reverse=True)[:1000]
+    evidence = sorted(selected.values(), key=lambda row: (row.id in required_ids,row.observed_at, row.id), reverse=True)[:1000]
     frames = list(
         db.scalars(
             select(MetricFrame)

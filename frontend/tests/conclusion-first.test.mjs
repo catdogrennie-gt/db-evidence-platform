@@ -40,8 +40,8 @@ test('failed and pending reports label retained output as historical', () => {
   assert.equal(typeof ui.ReportEvidence, 'function');
   for (const status of ['failed', 'analyzing']) assert.match(render(ui.ReportEvidence, { data: { ...base, status } }), /保留的历史输出/);
 });
-test('only four navigation entries and group selections remain', () => {
-  assert.deepEqual(app.menuDefinitions?.map(x => x.label), ['问题分析', 'Zabbix 接入', '数据查看', '配置']);
+test('five navigation entries retain core workflow and add restricted demo', () => {
+  assert.deepEqual(app.menuDefinitions?.map(x => x.label), ['问题分析', 'Zabbix 接入', '数据查看', '配置', '演示']);
   assert.doesNotMatch(readFileSync('src/Monitoring.tsx', 'utf8'), /HostSelection|singleObjects|按单主机接入|\/monitoring\/objects/);
   assert.doesNotMatch(readFileSync('src/Admin.tsx', 'utf8'), /function Collection\(|<Collection|采集模板/);
 });
@@ -111,4 +111,27 @@ test('first-view summary exposes the three questions and every action before fol
   assert.doesNotMatch(detail, /<details[^>]*\bopen/);
   assert.ok(firstView.indexOf(summary.conclusion.statement) < firstView.indexOf('发生了什么'));
   assert.match(firstView, /class="executive-questions"/);
+});
+
+test('demo navigation requires its own action and hides global filters for canonical and trailing-slash routes', () => {
+  assert.deepEqual(app.menuDefinitions.find(x => x.key === '/demo')?.permissions, ['demo.operate']);
+  assert.equal(typeof app.showGlobalFilters, 'function');
+  assert.equal(app.showGlobalFilters('/demo'), false);
+  assert.equal(app.showGlobalFilters('/demo/'), false);
+  assert.equal(app.showGlobalFilters('/metrics'), true);
+});
+test('unfinished historical reports without summaries do not claim to be legacy reports', () => {
+  for (const status of ['failed', 'queued', 'analyzing']) {
+    const html = render(history.HistoricalInvestigationReport, { data: { id, status, mode: 'live_redacted', report: { facts: [{ statement: '保留的本轮原始观察', evidence_ids: [id] }] }, model_calls: [{ status: 'failed', error_code: 'model_token_budget_exhausted' }] } });
+    assert.match(html, /本轮未生成结论摘要/);
+    assert.doesNotMatch(html, /旧版未生成完整结论摘要/);
+    assert.match(html, /保留的本轮原始观察/);
+    assert.match(html, /model_token_budget_exhausted/);
+  }
+});
+test('completed legacy historical reports keep the legacy summary label', () => {
+  const html = render(history.HistoricalInvestigationReport, { data: { id, status: 'completed', mode: 'live_redacted', report: { facts: [{ statement: '历史原文仍在', evidence_ids: [id] }] } } });
+  assert.match(html, /旧版未生成完整结论摘要/);
+  assert.doesNotMatch(html, /本轮未生成结论摘要/);
+  assert.match(html, /历史原文仍在/);
 });

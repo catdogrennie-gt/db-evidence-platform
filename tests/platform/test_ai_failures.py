@@ -556,3 +556,46 @@ def test_cumulative_32000_budget_still_blocks_followup(ai_env):
     result=run_investigation(ai_env['factory'],lease,config,model_client=provider)
     assert result.status=='failed' and result.report['error_code']=='model_token_budget_exhausted'
     assert len(calls)==1
+
+@pytest.mark.parametrize('known_usage',[True,False])
+def test_followup_context_compacts_to_remaining_cumulative_budget(ai_env,monkeypatch,known_usage):
+    """A 23.5k second request fits the per-round cap but needs 32k-budget compaction."""
+    import copy
+    import json
+    from platform_app import model_context
+    from platform_app.investigations import run_investigation
+    from platform_app.tools import project_evidence
+    from platform_app.models import ModelCall
+    from sqlalchemy import select
+    row,_,lease,config=prepared_run(ai_env)
+    frozen_result={'items':[project_evidence(ai_env['evidence'])], 'coverage':{'complete':False,'gaps':['bounded_test_projection']}}
+    monkeypatch.setattr(model_context,'prepare_tool_context',lambda result,max_bytes:copy.deepcopy(frozen_result))
+    calls=[]
+    def bound(payload):return len(json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode())+512
+    def provider(config,payload,timeout):
+        calls.append(copy.deepcopy(payload))
+        if len(calls)==1:
+            tool={'id':'budget-settlement','type':'function','function':{'name':'get_lock_graph','arguments':json.dumps({'instance_id':ai_env['a'].id})}}
+            message={'role':'assistant','content':'','tool_calls':[tool]}
+            probe=copy.deepcopy(payload)
+            probe['messages'] += [copy.deepcopy(message),{'role':'tool','tool_call_id':tool['id'],'content':json.dumps(frozen_result,ensure_ascii=False)}]
+            padding=23500-bound(probe)
+            assert padding>0 and bound(payload)<23700
+            message['content']='x'*padding
+            probe['messages'][-2]['content']=message['content']
+            assert bound(probe)==23500
+            response={'choices':[{'message':message}]}
+            if known_usage:response['usage']={'prompt_tokens':6517,'completion_tokens':244}
+            return response
+        assert payload['tool_choice']=='none' and payload['tools']==[]
+        assert bound(payload)<=24000 and 6517+244+bound(payload)+payload['max_tokens']<=32000
+        return provider_response(ai_env['evidence'].id)
+    result=run_investigation(ai_env['factory'],lease,config,model_client=provider)
+    if known_usage:
+        assert result.status=='completed' and len(calls)==2,result.report
+    else:
+        assert result.status=='failed' and result.report['error_code']=='model_usage_unknown'
+        assert len(calls)==1
+        with ai_env['factory']() as db:
+            call=db.scalar(select(ModelCall).where(ModelCall.investigation_id==row.id))
+            assert call.input_tokens is None and call.output_tokens is None and not call.response['usage_available']
