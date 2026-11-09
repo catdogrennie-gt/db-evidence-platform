@@ -10,7 +10,7 @@ An evidence-driven MySQL inspection and investigation platform.
 
 ## 公开演示
 
-[临时演示入口](https://byte-texts-allergy-examples.trycloudflare.com/demo)：账号 **`demo`**，密码 **`EvidenceDemo-2026!`**。这是唯一有意公开的本部署专用账号；新部署仍没有默认账号或通用密码。临时地址可能变化，服务依赖演示电脑在线，不承诺持续可用。**本地链路已实测，公网 API 仍待本机操作者重载及公网验收**；状态与模型局限见[演示验收](docs/acceptance-public-demo.md)。
+[临时演示入口](https://byte-texts-allergy-examples.trycloudflare.com/demo)：账号 **`demo`**，密码 **`EvidenceDemo-2026!`**。这是唯一有意公开的本部署专用账号；新部署仍没有默认账号或通用密码。临时地址可能变化，服务依赖演示电脑在线，不承诺持续可用。**本地链路、公网登录、演示页与冻结曲线已实测**；验证范围与模型局限见[演示验收](docs/acceptance-public-demo.md)。
 
 ![公开演示：固定锁等待开关、实际进度与冻结报告](docs/images/public-demo.png)
 
