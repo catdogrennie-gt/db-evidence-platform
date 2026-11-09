@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
@@ -31,6 +31,7 @@ class PlatformConfig(BaseModel):
     ssh_profiles: list[dict[str, Any]] = Field(default_factory=list)
     model: dict[str, Any] = Field(default_factory=dict, repr=False)
     prometheus_url: str = "http://127.0.0.1:9090"
+    collection_mode: Literal["zabbix_only", "legacy"] = "zabbix_only"
     session_hours: int = Field(default=8, ge=1, le=24)
 
     @model_validator(mode="after")
@@ -62,3 +63,36 @@ def load_config(path: str | Path | None = None) -> PlatformConfig:
         return PlatformConfig.model_validate(raw)
     except (OSError, ValueError) as exc:
         raise RuntimeError("Private platform configuration is unavailable or invalid") from None
+
+
+def zabbix_only(config=None, *, db=None):
+    if config is None and db is not None:
+        config = db.info.get("platform_config")
+    return getattr(config, "collection_mode", "zabbix_only") != "legacy"
+
+
+def require_legacy(config=None, *, db=None):
+    if zabbix_only(config, db=db):
+        from .common import PlatformError
+
+        raise PlatformError(
+            410,
+            "collection_mode_retired",
+            "旧直连、自定义采集和单主机入口已退役，请使用 Zabbix 联合分析对象。",
+        )
+
+
+def group_collection_allowed(db, instance, config=None, *, collector=None):
+    if not zabbix_only(config, db=db):
+        return True
+    from .monitoring import mapping_for
+
+    mapping = mapping_for(db, instance.id) if instance else None
+    return bool(
+        instance
+        and instance.connection_mode == "zabbix"
+        and mapping
+        and mapping.layer == "group"
+        and mapping.selected
+        and (collector is None or collector == "monitoring")
+    )

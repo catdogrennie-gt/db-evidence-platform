@@ -205,7 +205,7 @@ export function ExplainEvidenceView({ data }: { data: Row }) {
   );
 }
 
-function StatementRefs({
+export function StatementRefs({
   data,
   onMetricReference,
 }: {

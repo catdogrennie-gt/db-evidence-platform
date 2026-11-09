@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from ..config import require_legacy, group_collection_allowed
+
 import base64
 import json
 import math
@@ -805,6 +807,7 @@ def collection_profiles(
 
 @router.post("/collection-profiles", status_code=201)
 def create_collection_profile(body: dict = Body(...), actor: ActorContext = Depends(current_actor)):
+    require_legacy(db=actor.db)
     _require_global(actor, "collection_profile.manage")
     name = _name(body)
     collectors = body.get("collectors") or ["identity_status", "runtime"]
@@ -1210,7 +1213,7 @@ def model_profiles(request: Request, actor: ActorContext = Depends(current_actor
         "pricing_verified": bool(private.get("pricing")),
         "provider_locked": True,
         "max_calls": value.get("max_calls", 4),
-        "max_tokens": value.get("max_tokens", 2000),
+        "max_tokens": value.get("max_tokens", 3000),
     }
     return {"items": [item], "total": 1, "next_cursor": None}
 
@@ -1240,7 +1243,7 @@ def update_model_profile(
             "name": str(body.get("name", "默认模型配置"))[:120],
         }
     )
-    for key, maximum in [("max_calls", 4), ("max_tokens", 2000), ("timeout_seconds", 180)]:
+    for key, maximum in [("max_calls", 4), ("max_tokens", 3000), ("timeout_seconds", 180)]:
         if key in body:
             try:
                 number = int(body[key])

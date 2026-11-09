@@ -1,3 +1,5 @@
+import { ExecutiveSummary } from './ExecutiveSummary';
+export { ExecutiveSummary } from './ExecutiveSummary';
 import { useEffect, useId, useMemo, useState } from 'react';
 import {
   Alert,
@@ -13,6 +15,8 @@ import {
   Typography,
 } from 'antd';
 import { useParams } from 'react-router-dom';
+import type { Row } from './api';
+import type { ExecutiveSummaryData } from './ExecutiveSummary';
 import type { EChartsOption } from 'echarts';
 import { query, text } from './api';
 import { useCan, useResource, useScope, useScopedPath } from './hooks';
@@ -113,20 +117,22 @@ export function IntelligenceHome() {
     can('data.read') && can('event.read') ? path : null,
     refresh + tick,
   );
+  const recentPath = useScopedPath('/investigations', { limit: 3 });
+  const recent = useResource<{ items: Row[] }>(can('data.read') ? recentPath : null, refresh + tick);
   const data = resource.data;
   return (
     <div className="intel-page">
       <Title
-        title="问题与风险"
+        title="问题分析"
         description="自动发现，持续核对。从结果进入调查。"
         actions={
-          <ContextLink to="/inspection-settings">
+          <ContextLink to="/admin/inspection">
             <Button>巡检设置</Button>
           </ContextLink>
         }
       />
       {!can('data.read') || !can('event.read') ? (
-        <AccessNotice detail="查看问题与风险需要数据读取和事件读取权限。可在“监控对象”查看已授权资源。" />
+        <AccessNotice detail="查看问题分析需要数据读取和事件读取权限。可在“联合分析对象”查看已授权资源。" />
       ) : (
         <LoadState {...resource} retry={resource.reload}>
           {data && (
@@ -167,10 +173,10 @@ export function IntelligenceHome() {
               )}
               {data.stats.objects === 0 ? (
                 <Card className="intel-first-run">
-                  <Empty description="当前范围尚未纳入监控对象" />
+                  <Empty description="当前范围尚未纳入联合分析对象" />
                   <p>选择已有 Zabbix 对象后，后台按巡检策略收集授权证据并形成结果。</p>
                   <ContextLink to="/monitoring">
-                    <Button type="primary">选择监控对象</Button>
+                    <Button type="primary">选择联合分析对象</Button>
                   </ContextLink>
                 </Card>
               ) : (
@@ -193,12 +199,10 @@ export function IntelligenceHome() {
                   />
                 </>
               )}
+              <LoadState {...recent} retry={recent.reload}>{recent.data && <RecentAnalyses reports={recent.data.items} />}</LoadState>
               <div className="intel-bottom-note">
                 <span>结果来自后台巡检；本页每 30 秒刷新状态。</span>
-                <Space wrap>
-                  <ContextLink to="/events">事件工作流 →</ContextLink>
-                  <ContextLink to="/investigations">调查记录 →</ContextLink>
-                </Space>
+
               </div>
             </>
           )}
@@ -734,11 +738,7 @@ export function IssueReport() {
   const state = data
     ? reportState({ ...data, status: data.report_status ?? data.status })
     : 'unavailable';
-  const charts = prioritizeIssueCharts(
-    data?.charts ?? [],
-    data?.issue_category,
-    data?.event_subject?.id ?? data?.instance_ids[0],
-  );
+
   useEffect(() => setSelectedReference(undefined), [id]);
   useEffect(() => {
     if (
@@ -752,7 +752,7 @@ export function IssueReport() {
   return (
     <div className="intel-page">
       <div className="intel-breadcrumb">
-        <ContextLink to="/">问题与风险</ContextLink>
+        <ContextLink to="/">问题分析</ContextLink>
         <span> / 问题报告</span>
       </div>
       <Title
@@ -762,11 +762,11 @@ export function IssueReport() {
           data && (
             <Space wrap>
               <ContextLink to={`/events/${data.event_id}`}>
-                <Button>进入事件工作流</Button>
+                <Button>查看事件历史</Button>
               </ContextLink>
               {data.investigation_id && (
                 <ContextLink to={`/investigations/${data.investigation_id}`}>
-                  <Button>完整调查与审计</Button>
+                  <Button>历史报告与审计</Button>
                 </ContextLink>
               )}
             </Space>
@@ -787,8 +787,7 @@ export function IssueReport() {
                   <ReportCoverageTag status={data.coverage_status} />
                   <ReportFreshnessTag freshness={data.report_freshness} />
                 </Space>
-                <h2>概括</h2>
-                <p>{data.summary || '报告尚未提供概括。请先核对当前状态与来源资料。'}</p>
+
                 <div className="intel-report-meta">
                   <strong>
                     问题主体：
@@ -845,45 +844,7 @@ export function IssueReport() {
                 )}
               <div className="intel-report-layout">
                 <div className="intel-report-main">
-                  <Card title="证据关系">
-                    <EvidenceGraph
-                      nodes={data.nodes ?? []}
-                      edges={data.edges ?? []}
-                      investigationId={data.investigation_id}
-                      onMetricReference={setSelectedReference}
-                      category={data.issue_category}
-                      subjectId={data.event_subject?.id ?? data.instance_ids[0]}
-                    />
-                  </Card>
-                  {charts.length ? (
-                    <>
-                      <h2>重点冻结曲线</h2>
-                      <p className="intel-muted">
-                        {data.issue_category &&
-                        data.issue_category !== 'unknown' &&
-                        data.issue_category !== 'correlation'
-                          ? '按问题类别优先展示相关指标；其他观测与反证仍可展开核对。'
-                          : '本问题未指定单一重点指标；请结合全部观测与反证核对。'}
-                      </p>
-                      {charts.slice(0, 2).map((chart) => (
-                        <MetricPanel key={chart.id} data={chart} frozen />
-                      ))}
-                      {charts.length > 2 && <MoreFrozenCharts charts={charts.slice(2)} />}
-                    </>
-                  ) : (
-                    <Card title="报告曲线">
-                      <Empty description="此报告未保留可用的时序窗口。不会用当前曲线替代历史依据。" />
-                    </Card>
-                  )}
-                  {data.report && (
-                    <details className="intel-details intel-report-prose">
-                      <summary>完整分析文字与全部引用</summary>
-                      <InvestigationReportView
-                        data={data.report}
-                        onMetricReference={setSelectedReference}
-                      />
-                    </details>
-                  )}
+                  <ReportEvidence data={data} onMetricReference={setSelectedReference} />
                 </div>
                 <aside className="intel-report-aside">
                   <Card title="已核对与覆盖">
@@ -962,7 +923,7 @@ export function IssueReport() {
   );
 }
 
-function FrozenMetricDrawer({
+export function FrozenMetricDrawer({
   reference,
   investigationId,
   window,
@@ -1025,7 +986,7 @@ function MoreFrozenCharts({ charts }: { charts: MetricChartData[] }) {
   const [open, setOpen] = useState(false);
   return (
     <details className="intel-details" onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary>展开其余 {charts.length} 组冻结指标</summary>
+      <summary>查看 {charts.length} 组冻结指标</summary>
       {open && (
         <div className="intel-report-main">
           {charts.map((chart) => (
@@ -1052,4 +1013,30 @@ function TextItems({ title, items, empty }: { title: string; items?: string[]; e
       )}
     </section>
   );
+}
+
+export function ReportEvidence({ data, onMetricReference }: { data: IssueDetail; onMetricReference?: (ref: string) => void }) {
+  const state = reportState({ ...data, status: String(data.report_status ?? data.status) });
+  const charts = prioritizeIssueCharts((data.charts ?? []).filter(chart => chartData(chart.points ?? []).some(([, value]) => value !== null)), data.issue_category, data.event_subject?.id ?? data.instance_ids?.[0]);
+  return <>
+    {data.report && state !== 'ready' && <Alert type="warning" showIcon title="保留的历史输出" description="本次分析尚未成功完成，以下已保留内容不能代表当前问题已完成诊断。" />}
+    <ExecutiveSummary report={data.report} mode={data.analysis_mode} onMetricReference={onMetricReference} />
+    {data.report && <details className="intel-details intel-report-prose"><summary>分析过程与原始报告</summary><InvestigationReportView data={data.report} onMetricReference={onMetricReference} /></details>}
+    {!!data.nodes?.length && <details className="intel-details"><summary>证据关系 · {data.nodes.length} 个节点</summary><EvidenceGraph nodes={data.nodes} edges={data.edges ?? []} investigationId={data.investigation_id} onMetricReference={onMetricReference ?? (() => {})} category={data.issue_category} subjectId={data.event_subject?.id ?? data.instance_ids?.[0]} /></details>}
+    {!!charts.length && <MoreFrozenCharts charts={charts} />}
+  </>;
+}
+
+export function RecentAnalyses({ reports }: { reports: Row[] }) {
+  return <section className="intel-section"><div className="intel-section-head"><h2>最近分析</h2><span>包含正常巡检 · 按当前授权范围</span></div>
+    {reports.length ? <div className="intel-recent-reports">{reports.slice(0, 3).map(report => {
+      const summary = (report.report as Row | undefined)?.executive_summary as ExecutiveSummaryData | undefined;
+      const complete = ['completed', 'succeeded'].includes(String(report.status));
+      const pending = ['queued', 'running', 'preparing', 'analyzing', 'pending', 'collecting_evidence'].includes(String(report.status));
+      const title = !complete ? pending ? '分析尚未完成' : '分析未成功完成' : report.mode === 'rules_only' ? '规则巡检结果' : summary?.headline ?? '旧版未生成完整结论摘要';
+      return <Card key={String(report.id)} size="small"><Space wrap><Status value={report.status} /><Status value={report.mode} /><Time value={report.created_at} /></Space><ContextLink to={`/investigations/${report.id}`}><h3>{title}</h3></ContextLink>
+        {complete && report.mode !== 'rules_only' && summary && <p>{summary.conclusion.statement}</p>}
+        <ContextLink to={`/investigations/${report.id}`}>查看冻结报告 →</ContextLink></Card>;
+    })}</div> : <div className="intel-empty-inline">当前范围与时间内尚无分析报告。</div>}
+  </section>;
 }

@@ -1,5 +1,7 @@
 from datetime import timedelta
 import pytest
+
+pytestmark = pytest.mark.usefixtures("legacy_collection_compatibility")
 from sqlalchemy import select, func
 from tests.platform.test_ai_scope import ai_env
 from platform_app import models as m

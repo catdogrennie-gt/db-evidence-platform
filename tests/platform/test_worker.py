@@ -1,5 +1,7 @@
 """Worker boundary checks; these do not simulate a live process restart."""
 
+from types import SimpleNamespace
+
 from datetime import timedelta
 import pytest
 from sqlalchemy import select
@@ -214,7 +216,7 @@ def test_handler_failure_has_safe_task_error_and_releases_instance_lease(
         raise RuntimeError("SECRET_SQL_OR_PASSWORD")
 
     monkeypatch.setattr(worker, "handle_collection", broken)
-    response = worker.execute(factory, lease, object())
+    response = worker.execute(factory, lease, SimpleNamespace(collection_mode="legacy"))
     assert response == {"status": "failed", "error_code": "task_failed"}
     assert "SECRET_SQL_OR_PASSWORD" not in caplog.text
     with factory() as db:
@@ -239,7 +241,7 @@ def test_obsolete_worker_error_never_overwrites_successor_result(lease_env, monk
         raise ConnectorError("unreachable")
 
     monkeypatch.setattr(worker, "handle_collection", broken)
-    worker.execute(factory, old, object())
+    worker.execute(factory, old, SimpleNamespace(collection_mode="legacy"))
     with factory() as db:
         row = db.get(m.Task, old.id)
         assert row.status == "succeeded" and row.result == {"owner": "successor"}
@@ -259,7 +261,7 @@ def test_verification_partial_write_rolls_back_before_task_failure(lease_env, mo
         raise ConnectorError("timeout")
 
     monkeypatch.setattr(remediation, "handle_verification", interrupted)
-    worker.execute(factory, lease, object())
+    worker.execute(factory, lease, SimpleNamespace(collection_mode="legacy"))
     with factory() as db:
         assert db.get(m.PlatformSetting, "must_rollback") is None
         assert db.get(m.Task, lease.id).status == "failed"

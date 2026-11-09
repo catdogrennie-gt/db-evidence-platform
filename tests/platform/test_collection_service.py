@@ -19,7 +19,7 @@ def pipeline(monkeypatch):
 
     engine = create_db_engine("sqlite://")
     Base.metadata.create_all(engine)
-    factory = create_session_factory(engine)
+    factory = create_session_factory(engine, SimpleNamespace(collection_mode="legacy"))
     with factory.begin() as db:
         dep = m.Department(name="pipeline fixture")
         db.add(dep)
@@ -58,6 +58,7 @@ def pipeline(monkeypatch):
     monkeypatch.setattr(service, "validate_target", lambda config, value: dict(value))
     monkeypatch.setattr(service, "evaluate", lambda *args, **kwargs: None)
     config = SimpleNamespace(
+        collection_mode="legacy",
         host_profiles=[{"id": "host", "ssh_profile_ref": "ssh"}],
         log_profiles=[],
         tls_profiles=[],

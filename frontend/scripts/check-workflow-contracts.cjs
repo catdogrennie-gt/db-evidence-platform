@@ -310,3 +310,18 @@ assert(
     !link.includes('from=2026'),
 );
 console.log('workflow contracts: 16 isolated checks passed');
+
+// The reduced product retains authorized, exact-ID history without legacy creation screens.
+const { historyPath } = req('./src/navigation.ts');
+for (const kind of ['investigations', 'evidence', 'events', 'tasks', 'verifications', 'knowledge'])
+  assert.equal(historyPath(kind, id), `/${kind}/${id}`);
+assert.equal(historyPath('investigations', '../../current'), null);
+const { ExecutiveSummary } = req('./src/ExecutiveSummary.tsx');
+const historicalSummary = render(ExecutiveSummary, { report: { facts: [{ statement: '旧观察' }] } });
+assert(historicalSummary.includes('旧版未生成完整结论摘要'));
+assert(!historicalSummary.includes('已确认根因'));
+const appSource = fs.readFileSync(path.resolve(__dirname, '../src/App.tsx'), 'utf8');
+assert(!appSource.includes('<Onboarding') && !appSource.includes('<AssetList') && !appSource.includes('<Investigations'));
+const historySource = fs.readFileSync(path.resolve(__dirname, '../src/Historical.tsx'), 'utf8');
+assert(historySource.includes('historyPath(kind, id)') && historySource.includes('<ExecutiveSummary'));
+assert(!/api\.(post|put|delete)/.test(historySource));

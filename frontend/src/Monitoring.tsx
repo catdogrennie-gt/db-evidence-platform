@@ -13,9 +13,7 @@ import {
   Select,
   Space,
   Switch,
-  Table,
   Tag,
-  Typography,
 } from 'antd';
 import { useSearchParams } from 'react-router-dom';
 import { api, pageItems, query, rows, text } from './api';
@@ -23,12 +21,11 @@ import type { Page, Row, TaskRef } from './api';
 import { errorMessage, useCan, useResource, useScope, useScopedPath } from './hooks';
 import { ContextLink, ErrorNotice, LoadState, Status, Time, Title } from './ui';
 import { AccessNotice, CapabilityList, InspectionStatus, MetricPanel } from './Intelligence';
-import { AnalysisGroups } from './AnalysisGroups';
+import { AnalysisGroups, ItemHistory } from './AnalysisGroups';
 import { scopeKey, selectionForScope, sourcePayload } from './intelligenceModel';
 import type {
-  DiscoveredHost,
   InspectionPolicy,
-  MonitoringObject,
+  AnalysisGroup,
   MonitoringSource,
   ObjectMetrics,
 } from './intelligenceModel';
@@ -42,31 +39,22 @@ function MonitoringStatus({ status, source = false }: { status: string; source?:
 export function Monitoring() {
   const { scope, refresh } = useScope();
   const can = useCan();
-  const path = useScopedPath('/monitoring/objects');
-  const resource = useResource<{ items: MonitoringObject[]; total: number }>(
-    can('data.read') ? path : null,
-    refresh,
-  );
   const sources = useResource<{ items: MonitoringSource[]; total: number }>(
     can('asset.onboard') ? '/monitoring/sources' : null,
     refresh,
   );
-  const [sourceId, setSourceId] = useState<string>();
   const [editing, setEditing] = useState<MonitoringSource | 'new'>();
   const businessScope = scopeKey(scope);
   useEffect(() => {
-    setSourceId(undefined);
     setEditing(undefined);
   }, [businessScope]);
   const visibleSources = (sources.data?.items ?? []).filter(
     (s) => !scope.system_id || s.system_id === scope.system_id,
   );
-  const selectedSource = visibleSources.find((s) => s.id === sourceId);
-  const singleObjects = (resource.data?.items ?? []).filter((object) => object.engine !== 'analysis');
   return (
     <div className="intel-page">
       <Title
-        title="监控对象"
+        title="Zabbix 接入"
         description="从 Zabbix 勾选相关主机和监控项，组成联合分析对象，持续观察并分析系统问题。"
         actions={
           <Space wrap>
@@ -75,13 +63,13 @@ export function Monitoring() {
                 连接 Zabbix 来源
               </Button>
             )}
-            <ContextLink to="/inspection-settings">
+            <ContextLink to="/admin/inspection">
               <Button>巡检策略</Button>
             </ContextLink>
           </Space>
         }
       />
-      <AnalysisGroups sources={visibleSources} sourcesLoading={sources.loading} version={refresh} changed={resource.reload} />
+      <AnalysisGroups sources={visibleSources} sourcesLoading={sources.loading} version={refresh} changed={sources.reload} />
       {can('asset.onboard') && (
         <Card
           className="intel-source-card"
@@ -105,7 +93,6 @@ export function Monitoring() {
                       </div>
                       <Space wrap>
                         <MonitoringStatus status={source.status} source />
-                        <Button onClick={() => setSourceId(source.id)}>按单主机接入</Button>
                         <Button type="text" onClick={() => setEditing(source)}>
                           配置 / 轮换凭据
                         </Button>
@@ -123,70 +110,6 @@ export function Monitoring() {
           </LoadState>
         </Card>
       )}
-      {selectedSource && (
-        <HostSelection
-          key={`${businessScope}:${selectedSource.id}`}
-          source={selectedSource}
-          close={() => setSourceId(undefined)}
-          saved={() => {
-            resource.reload();
-            sources.reload();
-          }}
-        />
-      )}
-      <details className="analysis-single-objects">
-      <summary>单主机监控对象 · {singleObjects.length} 个已授权对象</summary>
-      {!can('data.read') ? (
-        <AccessNotice detail="来源配置权限与业务数据权限独立。当前身份可管理授权来源，但未获得监控对象数据读取权限。" />
-      ) : (
-        <LoadState {...resource} retry={resource.reload}>
-          {resource.data &&
-            (singleObjects.length ? (
-              <div className="intel-object-grid">
-                {singleObjects.map((object) => (
-                  <Card
-                    key={object.id}
-                    className="intel-object-card"
-                    title={
-                      <ContextLink to={`/metrics?instance_id=${object.id}`}>
-                        {object.name}
-                      </ContextLink>
-                    }
-                    extra={<MonitoringStatus status={object.status} />}
-                  >
-                    <div className="intel-object-meta">
-                      <Tag>{object.engine || '对象类型未识别'}</Tag>
-                      <span>
-                        {object.system_name} · {object.source_name}
-                      </span>
-                      <Tag color={object.enabled ? 'blue' : 'default'}>
-                        {object.enabled ? '已纳入巡检' : '已暂停巡检'}
-                      </Tag>
-                    </div>
-                    <CapabilityList capabilities={object.capabilities ?? []} compact />
-                    <div className="intel-object-footer">
-                      <span>
-                        最近观察 <Time value={object.last_observed_at} />
-                      </span>
-                      <ContextLink to={`/metrics?instance_id=${object.id}`}>查看指标 →</ContextLink>
-                    </div>
-                    <ContextLink to={`/assets/${object.id}/overview`}>
-                      对象资料与原有运维工作流 ↗
-                    </ContextLink>
-                  </Card>
-                ))}
-              </div>
-            ) : (
-              <Card>
-                <Empty description="当前范围没有已选择且有权限读取的监控对象" />
-                <p className="intel-muted">
-                  有接入权限的维护者可从已有来源选择对象；没有接入权限时，请由管理员配置并授予相应业务范围。
-                </p>
-              </Card>
-            ))}
-        </LoadState>
-      )}
-      </details>
       <Alert
         className="intel-gap-banner"
         type="info"
@@ -332,142 +255,12 @@ function SourceForm({
   );
 }
 
-function HostSelection({
-  source,
-  close,
-  saved,
-}: {
-  source: MonitoringSource;
-  close: () => void;
-  saved: () => void;
-}) {
-  const { message } = App.useApp();
-  const resource = useResource<{ items: DiscoveredHost[]; total: number; truncated: boolean }>(
-    `/monitoring/sources/${source.id}/hosts`,
-  );
-  const [selected, setSelected] = useState<string[]>();
-  const [search, setSearch] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<unknown>();
-  const ids = selected ?? resource.data?.items.filter((h) => h.selected).map((h) => h.hostid) ?? [];
-  async function save() {
-    setBusy(true);
-    setError(undefined);
-    try {
-      await api.post(`/monitoring/sources/${source.id}/selection`, { hostids: ids }, true);
-      message.success('巡检对象选择已保存');
-      saved();
-      resource.reload();
-      setSelected(undefined);
-    } catch (e) {
-      setError(e);
-    } finally {
-      setBusy(false);
-    }
-  }
-  return (
-    <Card
-      className="intel-host-picker"
-      title={`选择已有对象 · ${source.name}`}
-      extra={
-        <Button type="text" onClick={close}>
-          收起
-        </Button>
-      }
-    >
-      <ErrorNotice error={error} />
-      <LoadState {...resource} retry={resource.reload}>
-        {resource.data && (
-          <>
-            {resource.data.truncated && (
-              <Alert
-                type="warning"
-                showIcon
-                title="发现结果被截断，暂不能保存整体选择"
-                description="请缩小来源允许的主机组范围后重新发现，避免误取消未显示对象。"
-              />
-            )}
-            <div className="intel-toolbar">
-              <Input.Search
-                aria-label="搜索已有监控对象"
-                placeholder="搜索对象名称或类型"
-                allowClear
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              <span>
-                已选 {ids.length} / 发现 {resource.data.total}
-              </span>
-            </div>
-            <Table<DiscoveredHost>
-              rowKey="hostid"
-              size="small"
-              scroll={{ x: 680 }}
-              dataSource={resource.data.items.filter((h) =>
-                `${h.name} ${h.layer}`.toLowerCase().includes(search.toLowerCase()),
-              )}
-              pagination={{ pageSize: 8, showSizeChanger: false }}
-              rowSelection={{
-                selectedRowKeys: ids,
-                preserveSelectedRowKeys: true,
-                onChange: (keys) => setSelected(keys.map(String)),
-                getCheckboxProps: (host) => ({
-                  disabled:
-                    !ids.includes(host.hostid) &&
-                    (!!host.binding_error ||
-                      !host.capabilities.some((cap) => cap.status === 'available')),
-                }),
-              }}
-              columns={[
-                {
-                  title: '监控对象',
-                  dataIndex: 'name',
-                  render: (name, host) => (
-                    <>
-                      <strong>{name}</strong>
-                      <div className="intel-muted">
-                        {host.layer} · {host.item_count} 个上游条目
-                      </div>
-                      {host.binding_error && (
-                        <Typography.Text type="danger">
-                          采集身份存在歧义，需维护者修正映射后重试。
-                        </Typography.Text>
-                      )}
-                    </>
-                  ),
-                },
-                {
-                  title: '识别到的能力 / 缺口',
-                  render: (_, host) => <CapabilityList capabilities={host.capabilities} compact />,
-                },
-              ]}
-            />
-            <div className="intel-toolbar">
-              <Typography.Text type="secondary">
-                数据库、主机等作为独立对象保留。歧义映射由服务端拒绝。
-              </Typography.Text>
-              <Button
-                type="primary"
-                loading={busy}
-                disabled={resource.data.truncated}
-                onClick={save}
-              >
-                保存对象选择
-              </Button>
-            </div>
-          </>
-        )}
-      </LoadState>
-    </Card>
-  );
-}
-
 export function MetricsDashboard() {
   const can = useCan();
   const { scope, refresh } = useScope();
   const [search, setSearch] = useSearchParams();
-  const objectsPath = useScopedPath('/monitoring/objects');
-  const resource = useResource<{ items: MonitoringObject[]; total: number }>(
+  const objectsPath = useScopedPath('/monitoring/groups');
+  const resource = useResource<{ items: AnalysisGroup[]; total: number }>(
     can('data.read') ? objectsPath : null,
     refresh,
   );
@@ -477,7 +270,7 @@ export function MetricsDashboard() {
   });
   const businessScope = scopeKey({ ...scope, instance_id: undefined });
   const selected = scope.instance_id
-    ? [scope.instance_id]
+    ? (resource.data?.items ?? []).filter(group => group.instance_id === scope.instance_id).map(group => group.id)
     : selectionForScope(selection.scope, businessScope, selection.ids);
   const validObjects = resource.data?.items ?? [];
   function select(ids: string[]) {
@@ -490,11 +283,11 @@ export function MetricsDashboard() {
   return (
     <div className="intel-page">
       <Title
-        title="指标看板"
+        title="数据查看"
         description="查询当前上游历史，与报告冻结证据分开显示。按相同时间窗口对照数据库、主机与网络信号。"
         actions={
           <ContextLink to="/monitoring">
-            <Button>管理监控对象</Button>
+            <Button>管理联合分析对象</Button>
           </ContextLink>
         }
       />
@@ -520,7 +313,7 @@ export function MetricsDashboard() {
                     allowClear
                     showSearch
                     optionFilterProp="label"
-                    placeholder="选择最多 5 个已授权监控对象"
+                    placeholder="选择最多 5 个已授权联合分析对象"
                     value={selected}
                     onChange={select}
                     options={validObjects.map((o) => ({
@@ -529,8 +322,9 @@ export function MetricsDashboard() {
                     }))}
                   />
                 </div>
+                {selected.some(id => !validObjects.some(group => group.id === id)) && <Alert type="warning" title="所选对象不在当前授权联合对象中" description="请重新选择联合分析对象；不会用其他对象的数据替代。" />}
                 {selected.length ? (
-                  selected.map((id) => <ObjectMetricView key={`${businessScope}:${id}`} id={id} />)
+                  selected.filter(id => validObjects.some(group => group.id === id)).map((id) => <ObjectMetricView key={`${businessScope}:${id}`} id={id} group={validObjects.find(group => group.id === id)!} />)
                 ) : (
                   <Card>
                     <Empty
@@ -556,13 +350,15 @@ export function MetricsDashboard() {
   );
 }
 
-function ObjectMetricView({ id }: { id: string }) {
+function ObjectMetricView({ id, group }: { id: string; group: AnalysisGroup }) {
   const { scope, refresh } = useScope();
   const resource = useResource<ObjectMetrics>(
-    `/monitoring/objects/${id}/metrics?${query({ from: scope.from, to: scope.to })}`,
+    `/monitoring/groups/${id}/metrics?${query({ from: scope.from, to: scope.to })}`,
     refresh,
   );
   const [filter, setFilter] = useState('');
+  const [itemId, setItemId] = useState<string>();
+  const item = group.items.find(item => item.itemid === itemId);
   const charts =
     resource.data?.charts.filter((c) =>
       `${c.title} ${c.unit}`.toLowerCase().includes(filter.toLowerCase()),
@@ -583,6 +379,7 @@ function ObjectMetricView({ id }: { id: string }) {
                 style={{ maxWidth: 260 }}
               />
             </div>
+            <section className="intel-details"><h3>原始历史、文本与日志</h3><Select showSearch allowClear optionFilterProp="label" placeholder="选择一个监控项查看原始历史" value={itemId} onChange={setItemId} options={group.items.map(item => ({ value: item.itemid, label: `${item.host_name} · ${item.name}` }))} style={{ width: '100%' }} />{item && <ItemHistory key={`${item.itemid}:${scope.from}:${scope.to}`} group={group} item={item} />}</section>
             <details className="intel-details">
               <summary>查看对象能力与缺口</summary>
               <CapabilityList capabilities={resource.data.capabilities} />
@@ -622,12 +419,12 @@ function PolicyForm() {
   const { message } = App.useApp();
   const [form] = Form.useForm<InspectionPolicy>();
   const policyPath = '/intelligence/policy';
-  const objectsPath = '/monitoring/objects';
+  const objectsPath = '/monitoring/groups';
   const resource = useResource<{ policy: InspectionPolicy | null; status: Row }>(
     can('investigation.create') ? policyPath : null,
     refresh,
   );
-  const objects = useResource<{ items: MonitoringObject[]; total: number }>(
+  const objects = useResource<{ items: AnalysisGroup[]; total: number }>(
     can('data.read') ? objectsPath : null,
     refresh,
   );
@@ -698,7 +495,7 @@ function PolicyForm() {
     <div className="intel-page">
       <Title
         title="巡检策略"
-        description="配置一次，由后台持续检查。日常使用从问题与风险进入。"
+        description="配置一次，由后台持续检查。日常使用从问题分析进入。"
         actions={
           <ContextLink to="/">
             <Button>返回结果首页</Button>
@@ -726,7 +523,7 @@ function PolicyForm() {
                   </Form.Item>
                   <Form.Item
                     name="instance_ids"
-                    label="联合分析对象 / 监控对象"
+                    label="联合分析对象"
                     rules={[
                       {
                         validator: (_, value) =>
@@ -747,8 +544,8 @@ function PolicyForm() {
                       optionFilterProp="label"
                       loading={objects.loading}
                       options={(objects.data?.items ?? []).map((o) => ({
-                        value: o.id,
-                        label: `${o.name} · ${o.engine === 'analysis' ? '联合分析' : o.system_name}`,
+                        value: o.instance_id,
+                        label: `${o.name} · ${o.source_name}`,
                         disabled: !o.enabled,
                       }))}
                     />
@@ -923,7 +720,7 @@ function PolicyForm() {
                       尚无自动巡检执行记录。启用策略并产生任务后在这里查看，包括未发现异常的正常巡检。
                     </p>
                   )}
-                  <ContextLink to="/investigations">查看全部调查记录 →</ContextLink>
+                  <ContextLink to="/">返回问题分析 →</ContextLink>
                 </Card>
                 <Card title="怎样形成结果" className="intel-policy-explainer">
                   <ol>

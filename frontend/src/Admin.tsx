@@ -1,3 +1,4 @@
+import { InspectionSettings } from './Monitoring';
 import { useState } from 'react';
 import {
   Alert,
@@ -33,7 +34,7 @@ const adminPages = [
   ['organization', '组织与系统', ['organization.manage']],
   ['users', '用户与授权', ['user.manage', 'grant.manage']],
   ['groups', '组与授权', ['group.manage', 'grant.manage']],
-  ['collection', '采集模板', ['collection_profile.manage']],
+  ['inspection', '巡检', ['investigation.create']],
   ['rules', '规则与维护窗', ['rule.manage']],
   ['ai-policy', '模型与外发', ['model_policy.manage']],
   ['platform', '平台状态与保留', ['platform.read', 'settings.manage']],
@@ -48,7 +49,7 @@ export function Admin() {
   return (
     <>
       <Title
-        title="平台管理"
+        title="配置"
         description="控制面管理权限与业务资料读取权限独立。所有修改保留审计。"
       />
       <Tabs
@@ -64,8 +65,8 @@ export function Admin() {
         <Users />
       ) : active === 'groups' ? (
         <Groups />
-      ) : active === 'collection' ? (
-        <Collection />
+      ) : active === 'inspection' ? (
+        <InspectionSettings />
       ) : active === 'rules' ? (
         <Rules />
       ) : active === 'ai-policy' ? (
@@ -511,75 +512,6 @@ function Groups() {
               />
             </>
           )
-        }
-      />
-    </>
-  );
-}
-function Collection() {
-  const [open, setOpen] = useState(false);
-  const [version, setVersion] = useState(0);
-  return (
-    <>
-      <ResourceList
-        key={version}
-        title="采集模板"
-        description="固定采集器、周期与超时。模板不包含任意脚本或 SQL。"
-        endpoint="/collection-profiles"
-        filters={<TagLabel value="版本化配置" />}
-        actions={
-          <Button type="primary" onClick={() => setOpen(true)}>
-            ＋ 新建模板
-          </Button>
-        }
-        columns={[
-          { key: 'name', title: '模板' },
-          { key: 'version', title: '版本' },
-          { key: 'enabled', title: '启用', render: (v) => text(v) },
-          { key: 'updated_at', title: '最近修改', render: (v) => <Time value={v} /> },
-        ]}
-      />
-      <CommandModal
-        title="建立采集模板"
-        open={open}
-        onClose={() => setOpen(false)}
-        endpoint="/collection-profiles"
-        onSuccess={() => {
-          setOpen(false);
-          setVersion((v) => v + 1);
-        }}
-        fields={
-          <>
-            <Required name="name" label="模板名称" />
-            <Form.Item
-              name="interval_seconds"
-              label="运行周期（秒）"
-              initialValue={30}
-              rules={[{ required: true }]}
-            >
-              <InputNumber min={15} max={3600} />
-            </Form.Item>
-            <Form.Item name="timeout_seconds" label="单源超时（秒）" initialValue={10}>
-              <InputNumber min={1} max={30} />
-            </Form.Item>
-            <Form.Item name="collectors" label="固定采集器" rules={[{ required: true }]}>
-              <Checkbox.Group
-                options={[
-                  'identity_status',
-                  'runtime',
-                  'statement_digest',
-                  'schema_config',
-                  'replication',
-                  'error_log',
-                  'slow_log',
-                  'host',
-                ].map((value) => ({ value, label: value }))}
-              />
-            </Form.Item>
-            <Form.Item name="enabled" label="启用" valuePropName="checked" initialValue={true}>
-              <Switch />
-            </Form.Item>
-          </>
         }
       />
     </>
@@ -1081,7 +1013,7 @@ function AiPolicies() {
                 <InputNumber min={1} max={4} />
               </Form.Item>
               <Form.Item name="max_tokens" label="每轮输出 Token 上限" initialValue={2000}>
-                <InputNumber min={1} max={2000} />
+                <InputNumber min={1} max={3000} />
               </Form.Item>
               <Alert type="warning" title="模型配置不会自动授权任何业务资料外发。" />
             </>

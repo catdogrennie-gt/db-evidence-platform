@@ -1,6 +1,8 @@
 """Regression gates from the final independent inspection review."""
 from datetime import timedelta
 import pytest
+
+pytestmark = pytest.mark.usefixtures("legacy_collection_compatibility")
 from sqlalchemy import select
 from tests.platform.test_ai_scope import ai_env
 from tests.platform.test_intelligence import policy_env

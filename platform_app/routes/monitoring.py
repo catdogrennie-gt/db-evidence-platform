@@ -1,4 +1,6 @@
 """Monitoring source administration and business-scoped observations."""
+
+from ..config import require_legacy, group_collection_allowed
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
@@ -86,6 +88,7 @@ def hosts(identifier: str, request: Request, actor=Depends(current_actor)):
 
 @router.post('/sources/{identifier}/selection')
 def selection(identifier: str, body: SelectionInput, request: Request, actor=Depends(current_actor)):
+    require_legacy(request.app.state.config)
     result = domain.select_hosts(actor, domain.get_source(actor, identifier), body.hostids, request.app.state.config)
     actor.db.commit()
     return result

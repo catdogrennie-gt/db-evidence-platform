@@ -95,3 +95,11 @@ const id = '11111111-1111-4111-8111-111111111111',
   console.error(error);
   process.exitCode = 1;
 });
+
+// Zabbix-only product does not re-expose legacy onboarding; polling remains a history contract.
+const monitoringSource = fs.readFileSync(path.resolve(__dirname, '../src/Monitoring.tsx'), 'utf8');
+assert(!monitoringSource.includes('HostSelection') && !monitoringSource.includes('/selection'));
+assert(monitoringSource.includes('/monitoring/groups'));
+const { historyPath } = req('./src/navigation.ts');
+assert.equal(historyPath('evidence', '../../private'), null);
+assert.equal(historyPath('users', id), null);

@@ -13,6 +13,7 @@ from .common import PlatformError, iso, fields, parse_time
 from .db import utcnow
 from .evidence import digest
 from .investigations import create_investigation, require_investigation_access, get_investigation, FindingProposal
+from .config import group_collection_allowed, require_legacy
 from .monitoring import mapping_for
 from .scheduling import db_now, task_ref
 
@@ -34,6 +35,9 @@ def policy_response(policy):
 def save_policy(actor, body):
     identifiers = sorted(set(body.get('instance_ids', [])))
     if len(identifiers) > 100 or not identifiers and body.get('enabled', False): raise PlatformError(422, 'invalid_inspection_scope', '启用巡检需要1–100个授权对象。')
+    for identifier in identifiers:
+        if not group_collection_allowed(actor.db, actor.db.get(m.Instance, identifier)):
+            require_legacy(db=actor.db)
     mode = body.get('mode', 'rules_only')
     if identifiers: require_investigation_access(actor, identifiers, mode)
     else: authorize(actor, 'investigation.create')
@@ -65,6 +69,7 @@ def check_inspection_task(db, task):
     for identifier in task.payload.get('instance_ids', []):
         instance = db.get(m.Instance, identifier, populate_existing=True)
         mapping = mapping_for(db, identifier)
+        if not group_collection_allowed(db, instance): require_legacy(db=db)
         if not instance or not instance.enabled or (mapping and not mapping.selected): raise PlatformError(409, 'inspection_object_paused', '巡检对象已停用。')
 
 
@@ -314,6 +319,7 @@ def dispatch_due(factory, *, policy_id=None, force=False):
                 if policy.mode=='live_redacted' and not policy.external_confirmed: raise PlatformError(403,'inspection_consent_revoked','巡检外发许可已撤回。')
                 for identifier in policy.instance_ids:
                     instance = db.get(m.Instance,identifier)
+                    if not group_collection_allowed(db, instance): require_legacy(db=db)
                     mapping = mapping_for(db,identifier)
                     if not instance.enabled or instance.lifecycle_state != 'Active' or mapping and not mapping.selected: raise PlatformError(409,'object_paused','巡检对象已停用。')
                     if mapping:
@@ -445,13 +451,15 @@ def issue_response(db,event,finding=None,actor=None):
 
 
 def overview(actor, **scope):
-    visible=_visible_ids(actor,scope)&_visible_ids(actor,scope,'event.read')
+    current_ids={row.id for row in actor.db.scalars(select(m.Instance)) if group_collection_allowed(actor.db,row)}
+    visible=_visible_ids(actor,scope)&_visible_ids(actor,scope,'event.read')&current_ids
     issues=[]
     for event in actor.db.scalars(select(m.Event).where(m.Event.instance_id.in_(visible),m.Event.status.notin_(TERMINAL_EVENTS)).order_by(m.Event.last_seen_at.desc()).limit(200)):
         finding=actor.db.scalar(select(m.InspectionFinding).where(m.InspectionFinding.event_id==event.id))
         issues.append(issue_response(actor.db,event,finding,actor))
     policy=actor.db.scalar(select(m.InspectionPolicy).where(m.InspectionPolicy.owner_id==actor.user_id))
     objects=list(actor.db.scalars(select(m.Instance).where(m.Instance.id.in_(_visible_ids(actor,scope)),m.Instance.enabled.is_(True),m.Instance.lifecycle_state=="Active")))
+    objects=[row for row in objects if row.id in current_ids]
     missing=0
     for instance in objects:
         mapping=mapping_for(actor.db,instance.id)

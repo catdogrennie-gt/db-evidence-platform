@@ -113,6 +113,7 @@ def prepare_local(
     _write(private / "fernet-master.key", key + b"\n")
     _write(private / "known_hosts", "")
     config = {
+        "collection_mode": "zabbix_only",
         "control_db": {
             "host": "127.0.0.1",
             "port": control_port,

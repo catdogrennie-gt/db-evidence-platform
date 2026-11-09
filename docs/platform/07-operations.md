@@ -1,6 +1,8 @@
 # Windows 本地部署与运维
 
-本指南部署独立平台，包含原 MySQL 直采与新增 Zabbix 自动巡检，不依赖旧实验 runtime/config.json、固定目标、VM、SSH 账号或模型密钥。真实测量来自个人隔离实验，不代表生产采用。新增链路见[本轮实际验收](../acceptance-zabbix.md)，原平台记录见 [06-acceptance-status.md](06-acceptance-status.md)。
+本指南部署 Zabbix 联合巡检平台。当前入口是问题分析、Zabbix 接入、数据查看与配置，报告先结论、后按需展开证据。新部署默认 `collection_mode=zabbix_only`，不依赖旧实验配置、固定目标、VM 或目标数据库口令。真实测量来自个人隔离 Lab，不代表生产采用。本轮实际结果见[结论优先验收](../acceptance-conclusion-first.md)，旧版结果见[联合对象验收](../acceptance-analysis-groups.md)、[Zabbix 历史验收](../acceptance-zabbix.md)及[原平台记录](06-acceptance-status.md)。
+
+旧直连、自定义采集模板和单 host 独立对象入口已退役；`legacy` 仅作历史兼容 / 旧测试。旧 ID 只读授权历史或提示退役，不跳到当前数据冒充原记录。默认模式在 API、调度和 worker 执行边界拒绝旧采集，包括切换前的入队 / 重试任务；历史读取、暂停与归档仍按权限。
 
 新部署生成器的默认 API/UI 端口为 **18080**，独立控制 MySQL **13306**，Prometheus **9090**，采集 worker 指标桥 **9120**；并行运行时须选择自己的不冲突配置。浏览器入口以私密配置的 public_origin 为准。旧 start.ps1 的 8765 实验应用不是本平台入口。目标地址、UUID、口令及私密报告不写入本指南。
 
@@ -13,7 +15,7 @@
 | 官方组件 | 单独安装目录，由参数指定，不复制到源码 |
 | 私密备份 | 另一受保护位置，保留匹配的控制库、主密钥和凭据 |
 
-需要 Windows、Python **3.12**、Node **22.12+** 或支持 Vite 8 的兼容版本、npm、PowerShell。参考环境组件为 **MySQL Community 8.4.13 LTS Windows x64** 和 **Prometheus 3.13.5 Windows amd64**，不表示“最新版本”。从 [MySQL 官方下载页](https://dev.mysql.com/downloads/mysql/8.4.html) 和 [Prometheus 官方下载页](https://prometheus.io/download/) 获取，人工核验版本及官方签名/校验值。生成器不下载或执行组件，不把目录名当版本证明。
+需要 Windows、Python **3.12**、Node **22.12+** 或支持 Vite 8 的兼容版本、npm、PowerShell。参考环境组件为 **MySQL Community 8.4.13 LTS Windows x64** 和 **Prometheus 3.13.5 Windows amd64**，不表示“最新版本”。从 [MySQL 官方下载页](https://dev.mysql.com/downloads/mysql/8.4.html) 和 [Prometheus 官方下载页](https://prometheus.io/download/) 获取，人工核验版本及官方签名/校验值。生成器不下载或执行组件，不把目录名当版本证明。生成器仍保留 Prometheus 路径和配置以兼容历史，但 Zabbix 联合采集不要求启动 Prometheus；只使用当前路径可不安装其二进制。
 
 以下命令在仓库根目录执行。示例路径需自行选择，私密目录父目录须已存在。先确认端口空闲；冲突时改端口，不停止未知进程。
 
@@ -63,7 +65,7 @@ $env:DBA_PLATFORM_CONFIG = $platformConfig
 
 不打印这些文件到共享记录，不复制到 issue，不提交 Git 或打进公开包。生成器不输出密码，也不读取旧实验配置。默认 admin 没有 data.read、敏感证据或模型外发权限；默认计划不创建业务资料。
 
-可选 DBA 计划只给示例系统内置 dba 角色，不授全局业务范围、敏感字段、模型外发或实验操作。人工审阅后，明确以该计划运行 bootstrap，并使用另一输出文件；默认初始化不会运行它。新增目标仍须私密监控凭据、预检、注册与激活。
+可选 DBA 计划只给示例系统内置 dba 角色，不授全局业务范围、敏感字段、模型外发或实验操作。人工审阅后，明确以该计划运行 bootstrap，并使用另一输出文件；默认初始化不会运行它。当前接入使用私密 Zabbix 只读凭据与精确项目选择，不走旧直连预检 / 注册 / 激活。
 
 ## 3. 首次初始化控制 MySQL
 
@@ -119,11 +121,11 @@ Remove-Item -LiteralPath (Join-Path $platformPrivate 'mysql-first-start.sql')
 
 ## 4. 显式迁移、身份初始化与启动
 
-本轮迁移在原控制库结构上增加来源及巡检记录，不另建身份或分析数据库：
+来源与巡检沿用原控制库结构，不另建身份或分析数据库。以下是既有迁移：
 
 | Revision | 内容 |
 | --- | --- |
-| `0005_monitoring` | `monitoring_sources`、`monitoring_mappings`；外部对象 UUID 可未知，原直连注册仍做身份验证 |
+| `0005_monitoring` | `monitoring_sources`、`monitoring_mappings`；外部对象 UUID 可未知；原直连形态仅保留历史兼容 |
 | `0006_inspection` | `inspection_policies`、`inspection_dispatches`、`inspection_findings`；关联原用户、实例、事件、调查与任务 |
 
 在目标运行目录的私密配置已核对、控制 schema 已选定后，显式设置配置再迁移。以下不打印配置或数据库口令：
@@ -136,17 +138,17 @@ if ($LASTEXITCODE -ne 0) { throw 'Migration failed; do not start application wor
 .\.venv\Scripts\python.exe -m alembic -c migrations/alembic.ini current
 .\.venv\Scripts\python.exe -m platform_app.bootstrap --config $platformConfig --plan (Join-Path $platformPrivate 'bootstrap-plan.json') --output (Join-Path $platformPrivate 'bootstrap-identifiers.json')
 if ($LASTEXITCODE -ne 0) { throw 'Bootstrap failed.' }
-.\scripts\platform\manage.ps1 -Action Start -Services prometheus,api,worker,ai -ConfigPath $platformConfig
-.\scripts\platform\manage.ps1 -Action Status -Services mysql,prometheus,api,worker,ai -ConfigPath $platformConfig
+.\scripts\platform\manage.ps1 -Action Start -Services api,worker,ai -ConfigPath $platformConfig
+.\scripts\platform\manage.ps1 -Action Status -Services mysql,api,worker,ai -ConfigPath $platformConfig
 ~~~
 
 API 不自动迁移或创建用户，bootstrap 不重置已有用户密码。管理员先建组织/系统/用户，按业务范围授权，再接入目标。不要为展示便利给管理员补全局业务权限。空平台不会从旧实验自动发现目标。
 
-本轮 head 为 `0006_inspection`。实际独立新 schema 已迁移到此版本并通过 readiness；全部旧数据形态的原位升级尚未逐项验证。已有环境升级先执行第 6 节的恢复点与停写流程，不重新运行空库初始化。`downgrade` 可能删除巡检记录，且外部对象未知 UUID 会限制 `0005` 回退；恢复旧源码不等于安全回退数据结构。
+当前源码 head 为 `0006_inspection`。历史独立新 schema 已迁移到此版本并通过 readiness；全部旧数据形态的原位升级尚未逐项验证。已有环境升级先执行第 6 节的恢复点与停写流程，不重新运行空库初始化。`downgrade` 可能删除巡检记录，且外部对象未知 UUID 会限制 `0005` 回退；恢复旧源码不等于安全回退数据结构。
 
-监控连接不应使用旧实验 operator/root。远端直连验证证书和主机身份；SSH 先人工核验 known_hosts，主机和日志路径由私密 profile 允许。平台不创建目标用户、GRANT、业务库、DDL 或开启日志，缺权限应显示缺口。模型默认空配置，系统默认 rules_only；启用外部模型还需私密供应商配置、系统/实例策略及用户明确授权。AI 不执行建议 SQL，人工方案、审批、执行记录和复核分别留存。
+Zabbix 来源使用独立只读凭据，不使用旧实验 operator/root。平台不创建目标用户、GRANT、业务库、DDL 或开启日志，缺权限显示缺口。旧 SSH profiles / known_hosts 随历史备份保留，不构成当前采集入口。模型默认空配置、模式默认 `rules_only`；启用外部模型另需私密供应商设置、业务策略及明确外发许可。DeepSeek 等为私密可选模型，不将个人 Pro 账号、端点或密钥写入公库。新请求输入硬界 24,000 字节，输出可配置到 3,000 tokens，尊重更低显式预算，累计 token / 调用 / 工具 / 费用限制继续有效。结构及引用校验不能保证语义正确。AI 只给建议，人工变更要求批准、前提与复验；平台不执行任意 SQL、Shell、写库或邮件发送。
 
-Zabbix 路径在“监控对象”连接只读来源、限制允许主机组、发现并选择已有对象，再在“巡检设置”保存当前负责人的授权对象及策略。无需提供目标 MySQL 口令。确认来源实际成功时间、对象能力与有效历史后再解释结果；模板名或保存成功提示不证明锁 / SQL / 日志已经存在。详细步骤见[操作指南](../user-guide.md)。
+在“Zabbix 接入”连接只读来源、限制允许主机组，按 host / item / tags 选择具体项目组成联合对象，再在“配置”的巡检设置保存负责人的授权对象及策略。无需提供目标 MySQL 口令。确认来源实际成功时间、对象能力与有效历史后再解释结果；模板名或保存成功提示不证明锁 / SQL / 日志已经存在。详细步骤见[操作指南](../user-guide.md)。
 
 ## 5. 健康、日志和安全启停
 
@@ -159,7 +161,7 @@ Invoke-RestMethod ($platformOrigin + '/api/v1/health/ready')
 .\scripts\platform\manage.ps1 -Action Stop -Services api,worker,ai -ConfigPath $platformConfig
 ~~~
 
-live 只证明 API 响应，ready 检查控制库/迁移，不证明所有依赖或实例健康。登录后检查平台状态页的 worker 心跳、维护错误、队列、失败运行、各来源新鲜度；检查 Prometheus /-/ready、目标 up 及真实窗口。指标桥由采集 worker 持有，重复启动可能端口冲突。
+live 只证明 API 响应，ready 检查控制库/迁移，不证明所有依赖或实例健康。登录后检查“配置”中的 worker 心跳、维护错误、队列与失败运行，并在“Zabbix 接入”和“数据查看”核对来源新鲜度与真实窗口。只有维护历史 Prometheus 服务时才检查其 /-/ready、目标 up 和 TSDB；不为当前 Zabbix 路径启动旧目标采集。指标桥由采集 worker 持有，重复启动可能端口冲突。
 
 日志在私密 logs/，进程身份记录在 pids/。以请求编号、Task ID、CollectionRun ID 定位，不粘贴配置、驱动原文或秘密。管理脚本按可执行文件、完整参数、模块、配置路径、进程创建时间核验 PID，身份不符即拒绝。不按端口或全部 python.exe 批量杀进程，不伪造 PID 文件接管手工进程。控制 MySQL 使用私密选项优雅关闭，不强杀数据目录写入进程。
 
@@ -186,4 +188,6 @@ P0 为 Windows 单机本机入口，未承诺高可用、互联网发布或生�
 
 第一条仅在临时目录验证模板，不启动服务。SQLite、mock、inline 适配器不是后台运行证明。真实 MySQL 并发/迁移检查需显式配置/开关；真实故障、模型外发和目标写操作各自需要批准的隔离范围，不能从“运行测试”推导授权。
 
-本轮真实来源、四身份 HTTP、冻结窗口、新 schema、双事务及多进程派发结果见[验收矩阵](../acceptance-zabbix.md)。其中正常模型周期完成与真实故障模型分析通过分别记录，SQL epoch 缺失时不把累计摘要当成已验证的窗口延迟。
+本轮四入口、Zabbix 单一模式、历史只读与模型结论的实际结果见[结论优先验收](../acceptance-conclusion-first.md)，不以中间测试数量或 completed 认定模型语义全部通过。历史真实来源、权限、冻结与并发记录见[旧验收](../acceptance-zabbix.md)，后续联合对象与 CPU 区间误读见[联合对象验收](../acceptance-analysis-groups.md)。SQL epoch 缺失时不把累计摘要当成已验证的窗口延迟。
+
+切换旧部署前先备份控制库及 Zabbix 配置 / 历史，归档旧对象并停用相关 mapping、schedule 与策略范围，保留证据引用。仅处理核实属于旧采集器的发送服务和明确旧 host，不影响共享官方监控。核对没有旧采集在途、官方采样继续推进；具体本机清理结果以验收记录为准，本文不把操作清单当作实测完成。

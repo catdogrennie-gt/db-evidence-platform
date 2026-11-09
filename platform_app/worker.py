@@ -17,7 +17,8 @@ from sqlalchemy.orm import aliased
 
 from .collection_service import handle_collection, handle_connection_test
 from .common import PlatformError, iso, parse_time
-from .config import load_config
+from . import config as collection_config
+from .config import load_config, require_legacy, group_collection_allowed
 from .db import create_db_engine, create_session_factory, utcnow
 from .evidence import purge_expired
 from .events import clock_tick, ensure_default_rules
@@ -29,6 +30,7 @@ from .models import (
     ConnectionTest,
     Instance,
     InstanceLease,
+    MonitoringMapping,
     PlatformSetting,
     Task,
     WorkerHeartbeat,
@@ -62,26 +64,38 @@ def schedule_due(factory):
     created = []
     with factory.begin() as db:
         current = db_now(db)
-        schedules = list(
-            db.scalars(
-                select(CollectionSchedule)
-                .join(Instance, Instance.id == CollectionSchedule.instance_id)
-                .where(
-                    CollectionSchedule.enabled.is_(True),
-                    CollectionSchedule.next_due_at <= current,
-                    Instance.enabled.is_(True),
-                    Instance.lifecycle_state == "Active",
-                )
-                .order_by(CollectionSchedule.next_due_at)
-                .limit(100)
-                .with_for_update(skip_locked=True)
+        query = (
+            select(CollectionSchedule)
+            .join(Instance, Instance.id == CollectionSchedule.instance_id)
+            .where(
+                CollectionSchedule.enabled.is_(True),
+                CollectionSchedule.next_due_at <= current,
+                Instance.enabled.is_(True),
+                Instance.lifecycle_state == "Active",
             )
         )
+        if collection_config.zabbix_only(db=db):
+            # Retired rows must not occupy the bounded due-work window.
+            query = query.join(
+                MonitoringMapping, MonitoringMapping.instance_id == Instance.id
+            ).where(
+                Instance.connection_mode == "zabbix",
+                MonitoringMapping.layer == "group",
+                MonitoringMapping.selected.is_(True),
+                CollectionSchedule.collector == "monitoring",
+            )
+        schedules = list(db.scalars(
+            query.order_by(CollectionSchedule.next_due_at)
+            .limit(100)
+            .with_for_update(skip_locked=True)
+        ))
         groups = {}
         for row in schedules:
             groups.setdefault(row.instance_id, []).append(row)
         for instance_id, rows in groups.items():
             instance = db.get(Instance, instance_id)
+            if not group_collection_allowed(db, instance):
+                continue
             if db.scalar(
                 select(Task.id)
                 .where(
@@ -92,7 +106,7 @@ def schedule_due(factory):
                 .limit(1)
             ):
                 continue
-            valid = [row for row in rows if row.config_revision == instance.config_revision]
+            valid = [row for row in rows if row.config_revision == instance.config_revision and group_collection_allowed(db, instance, collector=row.collector)]
             if not valid:
                 continue
             collectors = sorted(
@@ -391,10 +405,13 @@ def reconcile_interrupted(factory):
 def execute(factory, lease, config):
     try:
         if lease.type == "connection_test":
+            require_legacy(config)
             return handle_connection_test(factory, lease, config)
         if lease.type in ("activate_instance", "collect_instance"):
             with factory() as db:
                 external = db.get(Instance, lease.instance_id)
+                if not group_collection_allowed(db, external, config):
+                    require_legacy(config)
                 external = external is not None and external.connection_mode == "zabbix"
             if external:
                 from .monitoring import handle_collection as handle_monitoring

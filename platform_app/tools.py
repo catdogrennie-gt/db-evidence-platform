@@ -217,14 +217,23 @@ def _sql_structure(value, alias):
     return ' '.join(result)[:2048]
 
 
+def _structure_value(item, names):
+    """Known field names only; conflicting spellings have no trusted winner."""
+    values = [value for key, value in item.items() if isinstance(key, str) and key.upper() in names]
+    if not values or not all(isinstance(value, str) and value == values[0] for value in values):
+        return None
+    return values[0]
+
+
 def _structure_fields(item, alias):
     result = {}
     for output, names in {'schema_ref': ('OBJECT_SCHEMA', 'TABLE_SCHEMA', 'SCHEMA_NAME'), 'table_ref': ('OBJECT_NAME', 'TABLE_NAME'), 'index_ref': ('INDEX_NAME',), 'column_ref': ('COLUMN_NAME',)}.items():
-        value = next((item[name] for name in names if item.get(name)), None)
+        value = _structure_value(item, names)
         identifier = alias(value)
         if identifier: result[output] = identifier
     for name, values in {'LOCK_MODE': {'X','S','IX','IS','AUTO_INC','X,REC_NOT_GAP','S,REC_NOT_GAP','X,GAP','S,GAP'}, 'LOCK_STATUS': {'WAITING','GRANTED'}, 'LOCK_TYPE': {'RECORD','TABLE'}, 'TRX_STATE': {'RUNNING','LOCK WAIT','ROLLING BACK','COMMITTING'}, 'INDEX_TYPE': {'BTREE','HASH','FULLTEXT','RTREE'}}.items():
-        if isinstance(item.get(name), str) and item[name] in values: result[name] = item[name]
+        value = _structure_value(item, (name,))
+        if value in values: result[name] = value
     return result
 
 

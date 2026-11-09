@@ -6,7 +6,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { createServer } from 'vite';
 
 const server = await createServer({
-  server: { middlewareMode: true },
+  server: { middlewareMode: true, hmr: false },
   appType: 'custom',
   optimizeDeps: { noDiscovery: true, include: [] },
 });

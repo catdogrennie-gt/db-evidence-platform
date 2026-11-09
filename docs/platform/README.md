@@ -1,6 +1,12 @@
 # 内部 AI 数据库运维平台设计
 
-**当前入口（2026-11-09）：**[联合对象上手](../analysis-groups-guide.md)、[操作指南](../user-guide.md)及[联合对象架构增量](02-architecture.md#当前增量联合分析对象2026-11-09)。当前主路径是在一个 Zabbix 来源与业务系统中选择多个 host 的具体 items，复用已有授权、采集与自动巡检。本轮 HTTP、页面、权限与冻结、正常及受控锁周期已完成[限定验收](../acceptance-analysis-groups.md)。锁链引用匹配，CPU 区间误读明确保留；结果不构成生产或通用准确率证明。本目录后续原始设计图和逐项验收属于各自版本，不能代替新组的实际结果。
+**当前入口（2026-11-09）：**[结论优先指南](../conclusion-first-guide.md)、[联合对象上手](../analysis-groups-guide.md)、[操作指南](../user-guide.md)与[安装运维](07-operations.md)。产品收敛为问题分析、Zabbix 接入、数据查看、配置四入口；先展示现象、原因、结论和建议，详细证据图表按需后置。
+
+新部署默认 `collection_mode=zabbix_only`，Zabbix 是唯一默认采集路径。旧直连、自定义采集模板与单 host 独立对象入口退役；`legacy` 仅供历史兼容 / 旧测试。包含旧 ID 的链接只读授权历史或说明退役，不映射成当前观测；不可变清单、敏感读取、业务授权、审计与外发边界保留。
+
+本轮模型字段投影、数字和建议语义的实际复核见[结论优先验收](../acceptance-conclusion-first.md)，不以结构完成或 completed 宣称语义全部通过。[联合对象历史验收](../acceptance-analysis-groups.md)保留锁链匹配与 CPU 区间误读等限定结果。历史 Release `legacy-platform-2026.11.08` 和 `analysis-groups-2026.11.09` 保留，新版计划为 `conclusion-first-2026.11.09`，发布状态见[版本索引](../releases/README.md)。
+
+下列文档与原始设计图描述 2026-11-08 基线；旧页面、直连接入及人工流程不代表当前导航或新增采集入口。当前取舍以[结论优先设计](../superpowers/specs/2026-11-09-conclusion-first-design.md)为准，历史能力及验收不替代本轮验证。
 
 日期：2026-11-08。状态：设计基线 v1 已完成独立一致性检查；可点击原型的代表性路径已在浏览器复验。平台已按该基线实施，实际通过、待验和未实现范围以[验收记录](06-acceptance-status.md)为准；设计指标不等于已达标。
 

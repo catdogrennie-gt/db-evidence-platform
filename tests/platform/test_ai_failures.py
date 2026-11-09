@@ -33,6 +33,7 @@ def prepared_run(env, mode="live_redacted", **options):
 
 def provider_response(evidence_id, **extra):
     import json
+    from tests.platform.test_report_summary import summary
 
     return {
         "id": "test-response",
@@ -52,6 +53,7 @@ def provider_response(evidence_id, **extra):
                             "refutations": [],
                             "unknowns": ["business impact not measured"],
                             "next_readonly_checks": [],
+                            "executive_summary": summary(evidence_id),
                         }
                     ),
                 }
@@ -120,6 +122,7 @@ def test_rules_investigation_finishes_without_external_call(ai_env):
     result = run_investigation(ai_env["factory"], lease, config, model_client=forbidden)
     assert result.status == "completed"
     assert result.conclusion_type == "rule"
+    assert "executive_summary" not in result.report
     assert result.report["facts"][0]["evidence_ids"] == [ai_env["evidence"].id]
 
 
@@ -142,6 +145,8 @@ def test_live_report_is_persisted_with_real_call_audit_and_projected_input(ai_en
     result = run_investigation(ai_env["factory"], lease, config, model_client=provider)
     assert result.status == "completed" and result.conclusion_type == "live_model"
     assert len(captured) == 1
+    assert result.report["executive_summary"]["joint_root_cause"]["status"] == "insufficient_evidence"
+    assert result.report["prompt_version"] == "evidence-investigation-v3.5"
     assert all(
         s not in captured[0]
         for s in (
@@ -365,7 +370,7 @@ def test_tool_context_pressure_finalizes_without_raising_hard_token_cap(ai_env, 
                 {
                     "evidence_id": ai_env["evidence"].id,
                     "data": {
-                        "rows": [{"waiting_trx_id": i, "blocking_trx_id": i + 1} for i in range(30)]
+                        "rows": [{"waiting_trx_id": i, "blocking_trx_id": i + 1} for i in range(300)]
                     },
                 }
             ],
@@ -388,7 +393,7 @@ def test_tool_context_pressure_finalizes_without_raising_hard_token_cap(ai_env, 
                                     "type": "function",
                                     "function": {
                                         "name": "get_lock_graph",
-                                        "arguments": json.dumps({"instance_id": ai_env["a"].id}),
+                                        "arguments": json.dumps({"instance_id": ai_env["a"].id, "fixture_pressure": "x" * 930}),
                                     },
                                 }
                                 for i in range(6)
@@ -401,30 +406,34 @@ def test_tool_context_pressure_finalizes_without_raising_hard_token_cap(ai_env, 
         assert payload["tool_choice"] == "none"
         assert (
             len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()) + 512
-            <= 12000
+            <= 24000
         )
         return provider_response(ai_env["evidence"].id)
 
     result = run_investigation(ai_env["factory"], lease, config, model_client=provider)
-    assert result.status == "completed" and len(calls) == 2
+    assert result.status == "completed" and len(calls) == 2, (result.report, [(c["tool_choice"], len(json.dumps(c,ensure_ascii=False,separators=(",",":")).encode())+512) for c in calls])
 
 
-def test_deepseek_final_json_budget_disables_default_thinking(ai_env):
+@pytest.mark.parametrize('configured,expected', [(1000,1000),(2000,2000),(3000,3000),(5000,3000),(None,3000)])
+def test_deepseek_final_json_budget_disables_default_thinking(ai_env,configured,expected):
     from platform_app.investigations import run_investigation
 
     row, task, lease, config = prepared_run(ai_env)
     config.model["provider"] = "DeepSeek"
+    if configured is None: config.model.pop("max_tokens")
+    else: config.model["max_tokens"] = configured
 
     def provider(config, payload, timeout):
         assert payload["thinking"] == {"type": "disabled"}
         assert payload["response_format"] == {"type": "json_object"}
-        assert payload["max_tokens"] == 2000
+        assert payload["max_tokens"] == expected
         return provider_response(ai_env["evidence"].id)
 
     result = run_investigation(ai_env["factory"], lease, config, model_client=provider)
     assert result.status == "completed"
 
 
+@pytest.mark.usefixtures('legacy_collection_compatibility')
 @pytest.mark.parametrize('triggered',[True,False])
 def test_lock_observation_and_counterevidence_survive_initial_context_pressure(ai_env,monkeypatch,triggered):
     """A real trigger ID is not permission to cite an omitted observation."""
@@ -453,8 +462,8 @@ def test_lock_observation_and_counterevidence_survive_initial_context_pressure(a
     def with_frozen_metrics(*args,**kwargs):
         manifest=original(*args,**kwargs)
         db=args[0]
-        for index in range(5):
-            db.add(m.ManifestItem(manifest_id=manifest.id,instance_id=e['a'].id,item_type='time_series_window',payload={'template':'host_cpu_percent','owner_collector':'host','source':'zabbix_history','unit':'%','points':[{'time':iso(e['start']),'value':10+index,'validity':'valid'}],'coverage':{'complete':True}},payload_sha256='a'*64))
+        for index in range(100):
+            db.add(m.ManifestItem(manifest_id=manifest.id,instance_id=e['a'].id,item_type='time_series_window',payload={'template':'zabbix_item_numeric','item':{'hostid':str(101+index%2),'itemid':str(index),'name':'Measured statistic '+str(index),'key':'measured.statistic.'+str(index)},'owner_collector':'host','source':'zabbix_history','unit':'%','points':[{'time':iso(e['start']),'value':10+index,'validity':'valid'}],'coverage':{'complete':True}},payload_sha256='a'*64))
         db.flush();return manifest
     monkeypatch.setattr(evidence_module,'create_manifest',with_frozen_metrics)
     calls=[]
@@ -467,6 +476,83 @@ def test_lock_observation_and_counterevidence_survive_initial_context_pressure(a
     actual={item['evidence_id']:item for item in initial['evidence']}
     signal_refs={ref for signal in initial['inspection_signals'] for ref in signal['evidence_ids']}
     assert signal_refs.issubset(actual)
+    assert initial['numeric_series']['omitted_count'] > 0
     assert e['evidence'].id in actual and actual[e['evidence'].id]['data']['rows'][0]['blocking_trx_id']==13
     assert any(item['source']=='mysql.lock_waits' and item['data']['row_count']==0 and item['observed_at']>actual[e['evidence'].id]['observed_at'] for item in actual.values())
-    assert len(json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode())+512<=9000
+    assert len(json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode())+512<=24000
+
+@pytest.mark.parametrize('invalid', ['missing_summary','unknown_counterevidence','unapproved_change'])
+def test_invalid_new_live_report_fails_without_rule_summary_fallback(ai_env, invalid):
+    import json
+    from platform_app.investigations import run_investigation
+    row, _, lease, config = prepared_run(ai_env)
+    def provider(*_):
+        response = provider_response(ai_env['evidence'].id)
+        data = json.loads(response['choices'][0]['message']['content'])
+        if invalid == 'missing_summary': data.pop('executive_summary')
+        elif invalid == 'unknown_counterevidence': data['executive_summary']['joint_root_cause']['counterevidence_ids']=['unauthorized']
+        else: data['executive_summary']['recommended_actions'][0]['kind']='manual_change'
+        response['choices'][0]['message']['content']=json.dumps(data)
+        return response
+    result = run_investigation(ai_env['factory'],lease,config,model_client=provider)
+    assert result.status == 'failed'
+    assert result.report['error_code'] in {'invalid_model_report','unverified_evidence_citation'}
+    assert 'executive_summary' not in result.report and 'facts' not in result.report
+
+
+def test_missing_provider_usage_stops_before_second_call(ai_env):
+    import json
+    from platform_app.investigations import run_investigation
+    row, _, lease, config = prepared_run(ai_env)
+    calls=[]
+    def provider(*_):
+        calls.append(1)
+        return {'choices':[{'message':{'tool_calls':[{'id':'unknown-usage','type':'function','function':{'name':'get_lock_graph','arguments':json.dumps({'instance_id':ai_env['a'].id})}}]}}]}
+    result=run_investigation(ai_env['factory'],lease,config,model_client=provider)
+    assert result.status=='failed' and result.report['error_code']=='model_usage_unknown'
+    assert len(calls)==1
+
+@pytest.mark.parametrize('target', [24000,24001])
+def test_round_byte_boundary_includes_512_overhead(ai_env,monkeypatch,target):
+    import json
+    from platform_app import investigations as inv, model_context
+    from tests.platform.test_report_summary import summary
+    row, _, lease, config=prepared_run(ai_env)
+    config.model['max_calls']=1
+    initial={'coverage':{'retained_evidence_count':0},'evidence':[],'numeric_series':{'rows':[]},'inspection_signals':[]}
+    monkeypatch.setattr(model_context,'compact_initial',lambda _: __import__('copy').deepcopy(initial))
+    monkeypatch.setattr(inv,'tool_definitions',lambda _: [])
+    messages=[{'role':'system','content':''},{'role':'user','content':json.dumps(initial,ensure_ascii=False,separators=(',',':'))}]
+    probe={'model':'test','messages':messages,'max_tokens':2000,'temperature':0.1,'tools':[],'tool_choice':'none'}
+    base=len(json.dumps(probe,ensure_ascii=False,separators=(',',':')).encode())+512
+    monkeypatch.setattr(inv,'SYSTEM_PROMPT','x'*(target-base))
+    calls=[]
+    def provider(config,payload,timeout):
+        calls.append(payload)
+        assert len(json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode())+512==24000
+        data={'facts':[],'hypotheses':[],'refutations':[],'unknowns':['no measurements'],'next_readonly_checks':[]}
+        data['executive_summary']=summary()
+        for key in ['phenomenon','conclusion']:
+            data['executive_summary'][key].update(status='insufficient_evidence',statement='No frozen measurement was supplied',evidence_ids=[])
+        data['executive_summary']['surface_causes']=[]
+        data['executive_summary']['recommended_actions']=[]
+        return {'choices':[{'message':{'content':json.dumps(data)}}], 'usage':{'prompt_tokens':100,'completion_tokens':100}}
+    result=inv.run_investigation(ai_env['factory'],lease,config,model_client=provider)
+    if target==24000:
+        assert result.status=='partial' and len(calls)==1, result.report
+    else:
+        assert result.status=='failed' and result.report['error_code']=='model_token_budget_exhausted'
+        assert not calls
+
+
+def test_cumulative_32000_budget_still_blocks_followup(ai_env):
+    import json
+    from platform_app.investigations import run_investigation
+    row, _, lease, config=prepared_run(ai_env)
+    calls=[]
+    def provider(*_):
+        calls.append(1)
+        return {'choices':[{'message':{'tool_calls':[{'id':'large-usage','type':'function','function':{'name':'get_lock_graph','arguments':json.dumps({'instance_id':ai_env['a'].id})}}]}}], 'usage':{'prompt_tokens':31000,'completion_tokens':0}}
+    result=run_investigation(ai_env['factory'],lease,config,model_client=provider)
+    assert result.status=='failed' and result.report['error_code']=='model_token_budget_exhausted'
+    assert len(calls)==1

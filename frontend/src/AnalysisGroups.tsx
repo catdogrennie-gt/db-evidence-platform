@@ -99,7 +99,7 @@ export function AnalysisGroups({ sources, sourcesLoading, version, changed }: {
               <div className="intel-object-footer"><span>最近观察 <Time value={group.last_observed_at} /></span><span>每 {group.interval_seconds} 秒采集</span></div>
               <Space wrap>
                 <Button type="primary" onClick={() => setViewing(group)}>查看数据</Button>
-                <ContextLink to="/inspection-settings"><Button>配置巡检</Button></ContextLink>
+                <ContextLink to="/admin/inspection"><Button>配置巡检</Button></ContextLink>
                 {can('asset.onboard') && can('asset.manage') && <>
                   <Button onClick={() => setEditing(group)}>编辑范围</Button>
                   <Button type="text" loading={busyId === group.id} onClick={() => toggle(group)}>{group.enabled ? '暂停' : '启用'}</Button>
@@ -300,12 +300,12 @@ function GroupEditor({ group, sources, sourcesLoading, close, saved }: {
   </Modal>;
 }
 
-function GroupData({ group, close }: { group: AnalysisGroup; close: () => void }) {
+export function GroupData({ group, close }: { group: AnalysisGroup; close: () => void }) {
   const { scope, refresh } = useScope();
   const metrics = useResource<ObjectMetrics>(`/monitoring/groups/${group.id}/metrics?${query({ from: scope.from, to: scope.to })}`, refresh);
   const [itemId, setItemId] = useState<string>();
   const selectedItem = group.items.find(item => item.itemid === itemId);
-  return <Modal open title={`${group.name} · 实际监控数据`} width={1180} onCancel={close} footer={<Space><ContextLink to="/inspection-settings"><Button>配置后台巡检</Button></ContextLink><Button onClick={close}>关闭</Button></Space>}>
+  return <Modal open title={`${group.name} · 实际监控数据`} width={1180} onCancel={close} footer={<Space><ContextLink to="/admin/inspection"><Button>配置后台巡检</Button></ContextLink><Button onClick={close}>关闭</Button></Space>}>
     <div className="analysis-data-summary"><Tag>{group.host_count} 个主机</Tag><Tag>{group.item_count} 个监控项</Tag><span><Time value={scope.from} /> — <Time value={scope.to} /></span><span>来源：{group.source_name}</span></div>
     <Alert type="info" showIcon title="读取当前选定时间范围" description="数值使用实际时序，文本与日志按原值查看；缺数保留缺口。本页查询不会修改已经生成的历史分析报告。" />
     <Tabs items={[
@@ -332,7 +332,7 @@ interface HistoryRow {
   timestamp?: string; source?: string; severity?: string; logeventid?: string;
 }
 interface HistoryResult { item: ZabbixItem; kind: ZabbixItem['value_kind']; rows: HistoryRow[]; coverage: Row; provenance: Row }
-function ItemHistory({ group, item }: { group: AnalysisGroup; item: ZabbixItem }) {
+export function ItemHistory({ group, item }: { group: AnalysisGroup; item: ZabbixItem }) {
   const { scope, refresh } = useScope();
   const can = useCan();
   const permitted = !['text', 'log'].includes(item.value_kind) || can('evidence.read_sensitive');

@@ -9,3 +9,8 @@ export function scopedDestination(to: string, context: string): string {
   const search = target.toString();
   return path + (search ? '?' + search : '') + (fragment ? '#' + fragment : '');
 }
+
+export function historyPath(kind: string, id: string | undefined): string | null {
+  if (!['investigations', 'evidence', 'events', 'tasks', 'verifications', 'knowledge'].includes(kind) || !id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return null;
+  return `/${kind}/${id}`;
+}

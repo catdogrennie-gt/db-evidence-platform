@@ -72,6 +72,7 @@ export interface EvidenceEdge {
   provenance?: string;
 }
 export interface IssueDetail extends Issue {
+  report_status?: string;
   window: { from: string; to: string } | null;
   report: Row | null;
   nodes: EvidenceNode[];

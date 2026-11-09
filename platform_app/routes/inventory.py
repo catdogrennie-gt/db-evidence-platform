@@ -1,5 +1,7 @@
 """Scope-aware inventory and asynchronous onboarding commands."""
 
+from ..config import require_legacy, group_collection_allowed
+
 from datetime import timedelta
 import hashlib
 import hmac
@@ -158,6 +160,7 @@ def _save_draft(actor, config, body, row=None):
 def create_draft(
     request: Request, body: dict = Body(...), actor: ActorContext = Depends(current_actor)
 ):
+    require_legacy(request.app.state.config)
     return _save_draft(actor, request.app.state.config, body)
 
 
@@ -181,6 +184,7 @@ def patch_draft(
     body: dict = Body(...),
     actor: ActorContext = Depends(current_actor),
 ):
+    require_legacy(request.app.state.config)
     get_draft(identifier, actor)
     return _save_draft(
         actor, request.app.state.config, body, actor.db.get(ConnectionDraft, identifier)
@@ -191,6 +195,7 @@ def patch_draft(
 def test_connection(
     request: Request, body: dict = Body(...), actor: ActorContext = Depends(current_actor)
 ):
+    require_legacy(request.app.state.config)
     task = create_connection_test(
         actor.db,
         actor,
@@ -262,6 +267,7 @@ def list_instances(
 def create_instance(
     request: Request, body: dict = Body(...), actor: ActorContext = Depends(current_actor)
 ):
+    require_legacy(request.app.state.config)
     row = register_instance(actor.db, actor, request.app.state.config, body)
     actor.db.commit()
     return instance_response(actor.db, actor, row)
@@ -280,6 +286,8 @@ def update_instance(
     actor: ActorContext = Depends(current_actor),
 ):
     row = scoped_instance(actor, identifier, "asset.manage")
+    if set(body) & {"connection", "endpoint", "port", "connection_mode", "collectors", "collection_profile_id", "credential_ref", *SOURCE_FIELDS}:
+        require_legacy(request.app.state.config)
     expected_revision(row, request.headers.get("If-Match"))
     if any(
         key in body
@@ -335,6 +343,7 @@ def activate(
     body: dict = Body(...),
     actor: ActorContext = Depends(current_actor),
 ):
+    require_legacy(request.app.state.config)
     row = scoped_instance(actor, identifier, "asset.manage")
     payload = {"config_revision": body.get("config_revision")}
     old_task = find_idempotent(
@@ -406,10 +415,14 @@ def collect(
     actor: ActorContext = Depends(current_actor),
 ):
     row = scoped_instance(actor, identifier, "collection.trigger")
+    if not group_collection_allowed(actor.db, row, request.app.state.config):
+        require_legacy(request.app.state.config)
     if not row.enabled or row.lifecycle_state != "Active":
         raise PlatformError(409, "instance_not_active", "实例未激活或已停采。")
     permitted=set(COLLECTORS)
     defaults=['identity_status']
+    if not group_collection_allowed(actor.db, row, request.app.state.config):
+        require_legacy(request.app.state.config)
     if row.connection_mode=='zabbix':
         from ..monitoring import mapping_for
         from ..models import MonitoringSource
@@ -448,6 +461,7 @@ def collect(
 
 @router.post("/instances/{identifier}/capabilities/recheck", status_code=202)
 def recheck(identifier: str, request: Request, actor: ActorContext = Depends(current_actor)):
+    require_legacy(request.app.state.config)
     row = scoped_instance(actor, identifier, "asset.manage")
     staged = row.connection.get("_staged") or {}
     body = {
@@ -478,6 +492,7 @@ def rotate(
     body: dict = Body(...),
     actor: ActorContext = Depends(current_actor),
 ):
+    require_legacy(request.app.state.config)
     row = scoped_instance(actor, identifier, "asset.manage")
     stable_request = {
         "route": f"/instances/{identifier}/credentials/rotate",
@@ -544,6 +559,7 @@ def revalidate(
     body: dict = Body(...),
     actor: ActorContext = Depends(current_actor),
 ):
+    require_legacy(request.app.state.config)
     row = scoped_instance(actor, identifier, "asset.manage")
     expected_revision(row, request.headers.get("If-Match") or body.get("config_revision"))
     staged = row.connection.get("_staged") or {}

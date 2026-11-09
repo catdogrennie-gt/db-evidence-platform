@@ -282,7 +282,7 @@ def test_real_model_payload_keeps_large_group_numeric_context_and_frozen_tool(gr
     from platform_app.investigations import create_investigation,run_investigation
     from tests.platform.test_ai_failures import provider_response
     e=group_env; base=e['fake'].items[0]
-    e['fake'].items=[dict(base,itemid=str(100+i),hostid='101' if i<9 else '102',name='Measured application statistic '+str(i),key_='application.custom_metric_'+str(i),value_type=0,description='password DO-NOT-SEND') for i in range(18)]
+    e['fake'].items=[dict(base,itemid=str(100+i),hostid='101' if i<9 else '102',name='Measured application statistic '+str(i)+' padded description',key_='application.custom_metric_'+str(i)+'_retained_sample_count_long_key',value_type=0,description='password DO-NOT-SEND') for i in range(18)]
     e['fake'].items.extend(dict(base,itemid=str(118+i),hostid='102',value_type=4,key_='application.text_'+str(i)) for i in range(4))
     e['fake'].items[-1]['key_']='dbops.mysql.lock_snapshot'
     e['fake'].items[-2]['key_']='dbops.mysql.statement_digest_snapshot'
@@ -305,11 +305,12 @@ def test_real_model_payload_keeps_large_group_numeric_context_and_frozen_tool(gr
     captured=[]; reference=[]
     def provider(config,payload,timeout):
         captured.append(json.loads(json.dumps(payload)))
-        assert len(json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode())+512<=12000
+        assert len(json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode())+512<=24000
         assert 'DO-NOT-SEND' not in json.dumps(payload)
         if len(captured)==1:
             initial=json.loads(payload['messages'][1]['content']); series=initial['numeric_series']; columns=series['columns']; rows=series['rows']
-            assert 2<=len(rows)<=18
+            assert len(rows)==18
+            assert len(json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode())+512>12000
             assert {row[columns.index('hostid')] for row in rows}=={'101','102'}
             assert {row[columns.index('itemid')] for row in rows}.issubset({str(100+i) for i in range(18)})
             assert all(row[columns.index('last')]==(None if missing_last and row[columns.index('itemid')]=='117' else 17) for row in rows)
@@ -357,7 +358,7 @@ def test_manual_collect_route_queues_bound_group_profile_with_revision(group_env
     from platform_app.analysis_groups import save_group
     e=group_env; group=save_group(e['actor'],e['config'],e['body'])
     role=e['db'].scalar(select(m.Role).where(m.Role.name=='ai-test')); role.permissions=[*role.permissions,'collection.trigger']; e['db'].commit()
-    app=FastAPI(); app.include_router(router,prefix='/api/v1'); app.dependency_overrides[current_actor]=lambda:e['actor']
+    app=FastAPI(); app.state.config=e['config']; app.include_router(router,prefix='/api/v1'); app.dependency_overrides[current_actor]=lambda:e['actor']
     with TestClient(app) as client: result=client.post('/api/v1/instances/'+group['instance_id']+'/collect',json=body)
     assert result.status_code==202, result.json()
     task=e['db'].get(m.Task,result.json()['id'])
@@ -372,7 +373,7 @@ def test_monitoring_profile_is_not_available_to_unbound_direct_assets(group_env)
     from platform_app.routes.inventory import router
     e=group_env; e['a'].enabled=True; e['a'].lifecycle_state='Active'
     role=e['db'].scalar(select(m.Role).where(m.Role.name=='ai-test')); role.permissions=[*role.permissions,'collection.trigger']; e['db'].commit()
-    app=FastAPI(); app.include_router(router,prefix='/api/v1'); app.dependency_overrides[current_actor]=lambda:e['actor']
+    app=FastAPI(); app.state.config=e['config']; app.include_router(router,prefix='/api/v1'); app.dependency_overrides[current_actor]=lambda:e['actor']
     with TestClient(app) as client:
         assert client.post('/api/v1/instances/'+e['a'].id+'/collect',json={'collectors':['monitoring']}).status_code==422
         e['a'].connection_mode='zabbix'; e['db'].commit()

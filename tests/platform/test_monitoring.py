@@ -19,7 +19,7 @@ def monitoring_env(ai_env, monkeypatch):
     env = ai_env
     key = env['tmp_path'] / 'master.key'
     key.write_bytes(Fernet.generate_key())
-    config = SimpleNamespace(fernet_key_path=key, secrets_dir=env['tmp_path'] / 'secrets')
+    config = SimpleNamespace(collection_mode="legacy", fernet_key_path=key, secrets_dir=env['tmp_path'] / 'secrets')
     env['db'].info['platform_config'] = config
     role = env['db'].scalar(select(m.Role).where(m.Role.name == 'ai-test'))
     role.permissions = [*role.permissions, 'asset.onboard', 'event.read']

@@ -3,6 +3,8 @@
 from types import SimpleNamespace
 
 import pytest
+
+pytestmark = pytest.mark.usefixtures("legacy_collection_compatibility")
 from cryptography.fernet import Fernet
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -23,6 +25,7 @@ def admin_graph(tmp_path):
     key = tmp_path / "key"
     key.write_bytes(Fernet.generate_key())
     config = SimpleNamespace(
+        collection_mode="legacy",
         private_dir=tmp_path,
         fernet_key_path=key,
         secrets_dir=tmp_path / "secrets",

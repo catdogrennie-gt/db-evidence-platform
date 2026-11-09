@@ -1,5 +1,7 @@
 """State-machine checks use SQLite; concurrency proof is explicitly real MySQL."""
 
+from types import SimpleNamespace
+
 from datetime import timedelta
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -24,7 +26,7 @@ from platform_app.scheduling import (
 def lease_env():
     engine = create_db_engine("sqlite://")
     Base.metadata.create_all(engine)
-    factory = create_session_factory(engine)
+    factory = create_session_factory(engine, SimpleNamespace(collection_mode="legacy"))
     with factory.begin() as db:
         department = m.Department(name="lease state validation")
         db.add(department)
@@ -276,7 +278,7 @@ def test_real_mysql_locked_task_is_skipped_and_fixture_is_removed(monkeypatch, w
     from platform_app.config import load_config
 
     engine = create_db_engine(load_config())
-    factory = create_session_factory(engine)
+    factory = create_session_factory(engine, SimpleNamespace(collection_mode="legacy"))
     tag = uuid4().hex[:8]
     queue = "lease-test-" + tag
     instance_ids = []

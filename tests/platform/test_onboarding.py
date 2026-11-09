@@ -57,6 +57,7 @@ def graph(tmp_path):
     key = tmp_path / "key"
     key.write_bytes(Fernet.generate_key())
     config = SimpleNamespace(
+        collection_mode="legacy",
         allowed_networks=["127.0.0.0/8"],
         allowed_db_ports=[3306, 3307],
         ssh_profiles=[],
