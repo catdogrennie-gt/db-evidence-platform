@@ -11,7 +11,7 @@ class PolicyInput(BaseModel):
     model_config=ConfigDict(extra='forbid')
     enabled: bool=False
     instance_ids:list[str]=Field(default_factory=list,max_length=100)
-    signal_interval_seconds:int=Field(default=300,ge=30,le=86400)
+    signal_interval_seconds:int=Field(default=300,ge=5,le=86400)
     ai_interval_seconds:int=Field(default=1800,ge=300,le=86400)
     urgent_enabled:bool=True
     cooldown_seconds:int=Field(default=300,ge=30,le=86400)

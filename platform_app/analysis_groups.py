@@ -102,7 +102,7 @@ def save_group(actor,config,body,identifier=None):
     selected_hosts={i['hostid'] for i in items}; relations=body.get('relations',[])
     if len(relations)>32 or any(r['from_hostid'] not in selected_hosts or r['to_hostid'] not in selected_hosts or r['from_hostid']==r['to_hostid'] or r['kind'] not in ('runs_on','depends_on','connects_to','related_to') for r in relations): raise PlatformError(422,'invalid_group_relation','关系必须连接已选的两个不同主机。')
     interval=body.get('interval_seconds',60)
-    if not 30<=interval<=3600: raise PlatformError(422,'invalid_interval','采集周期必须为30至3600秒。')
+    if not 10<=interval<=3600: raise PlatformError(422,'invalid_interval','采集周期必须为10至3600秒。')
     settings={'kind':'analysis_group','description':body.get('description',''),'hosts':[{'hostid':str(h['hostid']),'name':h.get('name') or h.get('host'),'tags':h.get('tags',[])} for h in hosts], 'relations':sorted(relations,key=lambda r:(r['from_hostid'],r['to_hostid'],r['kind'],r.get('label','')))}
     enabled=body.get('enabled',True)
     if mapping is None:
@@ -235,7 +235,8 @@ def collect_group(db,instance,mapping,source,lease,config):
                 entries.append({'source':item['enhancement'],'observed_at':iso(stamp),'payload':payload,'sensitivity':'restricted','availability':'available' if fresh else 'stale','coverage':snapshot_coverage,'truncated':coverage['truncated']})
     check_fence(db,lease,config_revision=instance.config_revision)
     run.status='succeeded' if any(e['availability']=='available' for e in entries) else 'unavailable'; run.finished_at=db_now(db); run.row_count=len(entries)
-    evidence_ids=append_batch(db,instance,run,{'observed_at':iso(end),'evidence_items':entries},interval_seconds=60,collector_version='zabbix-generic-1')
+    schedule=db.scalar(select(m.CollectionSchedule).where(m.CollectionSchedule.instance_id==instance.id,m.CollectionSchedule.collector=='monitoring'))
+    evidence_ids=append_batch(db,instance,run,{'observed_at':iso(end),'evidence_items':entries},interval_seconds=schedule.interval_seconds if schedule else 60,collector_version='zabbix-generic-1')
     mapping.items=items
     if observed: mapping.last_observed_at=max(observed)
     instance.last_success_at=mapping.last_observed_at

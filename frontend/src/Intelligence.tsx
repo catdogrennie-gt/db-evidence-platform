@@ -1,6 +1,6 @@
 import { ExecutiveSummary } from './ExecutiveSummary';
 export { ExecutiveSummary } from './ExecutiveSummary';
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Button,
@@ -109,7 +109,7 @@ export function IntelligenceHome() {
   const { refresh } = useScope();
   const [tick, setTick] = useState(0);
   useEffect(() => {
-    const timer = setInterval(() => setTick((v) => v + 1), 30000);
+    const timer = setInterval(() => setTick((v) => v + 1), 3000);
     return () => clearInterval(timer);
   }, []);
   const path = useScopedPath('/intelligence/overview');
@@ -119,22 +119,29 @@ export function IntelligenceHome() {
   );
   const recentPath = useScopedPath('/investigations', { limit: 3 });
   const recent = useResource<{ items: Row[] }>(can('data.read') ? recentPath : null, refresh + tick);
-  const data = resource.data;
+  const retained = useRef<{ path: string; data?: IntelligenceOverview }>({ path });
+  const retainedRecent = useRef<{ path: string; data?: { items: Row[] } }>({ path: recentPath });
+  if (retained.current.path !== path || resource.error) retained.current = { path };
+  if (resource.data) retained.current = { path, data: resource.data };
+  if (retainedRecent.current.path !== recentPath || recent.error) retainedRecent.current = { path: recentPath };
+  if (recent.data) retainedRecent.current = { path: recentPath, data: recent.data };
+  const data = resource.data ?? retained.current.data;
+  const recentData = recent.data ?? retainedRecent.current.data;
   return (
     <div className="intel-page">
       <Title
         title="问题分析"
         description="自动发现，持续核对。从结果进入调查。"
         actions={
-          <ContextLink to="/admin/inspection">
+          can('investigation.create') ? <ContextLink to="/admin/inspection">
             <Button>巡检设置</Button>
-          </ContextLink>
+          </ContextLink> : undefined
         }
       />
       {!can('data.read') || !can('event.read') ? (
         <AccessNotice detail="查看问题分析需要数据读取和事件读取权限。可在“联合分析对象”查看已授权资源。" />
       ) : (
-        <LoadState {...resource} retry={resource.reload}>
+        <LoadState {...resource} loading={resource.loading && !data} retry={resource.reload}>
           {data && (
             <>
               <div className="intel-summary-strip">
@@ -146,6 +153,7 @@ export function IntelligenceHome() {
                 </div>
                 <Status value={data.inspection.mode ?? 'unknown'} />
               </div>
+              <InspectionActivity inspection={data.inspection} />
               <div className="intel-stat-grid">
                 {[
                   ['current', '当前需要关注', '已合并同一问题，持续跟踪'],
@@ -199,9 +207,9 @@ export function IntelligenceHome() {
                   />
                 </>
               )}
-              <LoadState {...recent} retry={recent.reload}>{recent.data && <RecentAnalyses reports={recent.data.items} />}</LoadState>
+              <LoadState {...recent} loading={recent.loading && !recentData} retry={recent.reload}>{recentData && <RecentAnalyses reports={recentData.items} />}</LoadState>
               <div className="intel-bottom-note">
-                <span>结果来自后台巡检；本页每 30 秒刷新状态。</span>
+                <span>结果来自后台巡检；本页每 3 秒刷新状态。</span>
 
               </div>
             </>
@@ -1039,4 +1047,19 @@ export function RecentAnalyses({ reports }: { reports: Row[] }) {
         <ContextLink to={`/investigations/${report.id}`}>查看冻结报告 →</ContextLink></Card>;
     })}</div> : <div className="intel-empty-inline">当前范围与时间内尚无分析报告。</div>}
   </section>;
+}
+
+
+export function InspectionActivity({ inspection }: { inspection: IntelligenceOverview['inspection'] }) {
+  const taskLabels: Record<string, string> = { queued: '排队中', preparing: '准备调查', collecting_evidence: '整理冻结证据', analyzing: '模型分析中', completed: '已完成', failed: '失败', running: '执行中' };
+  return <Card size="small" className="inspection-activity"><Space wrap size="large">
+    <span>实际最近采样 <Time value={inspection.last_observed_at} /></span>
+    <span>最近信号检查 <Time value={inspection.last_checked_at} /></span>
+    <span>下次检查 <Time value={inspection.next_check_at} /></span>
+    <span>实际采集 {inspection.collection_seconds == null ? '未知' : `${inspection.collection_seconds} 秒`} / 信号 {inspection.signal_seconds == null ? '未知' : `${inspection.signal_seconds} 秒`}</span>
+    {inspection.pacing?.active && <Tag color="gold">临时提频</Tag>}
+    <span>AI 任务：{inspection.task ? taskLabels[inspection.task.status] ?? inspection.task.status : '尚无 AI 任务'}</span>
+    {inspection.task && <span>任务创建 <Time value={inspection.task.created_at} /> · 开始 <Time value={inspection.task.started_at} /></span>}
+    {inspection.task?.error_code && <span>任务未成功：{inspection.task.error_code}</span>}
+  </Space></Card>;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Avatar,
@@ -31,10 +31,10 @@ import {
 } from './ui';
 import { HistoricalPage, RetiredPage } from './Historical';
 import { Admin } from './Admin';
-import { Demo } from './Demo';
+
 import { IntelligenceHome, IssueReport } from './Intelligence';
 import { MetricsDashboard, Monitoring } from './Monitoring';
-import { initialSidebarCollapsed } from './intelligenceModel';
+import { initialSidebarCollapsed, initialRollingWindow } from './intelligenceModel';
 export default function App() {
   const [actor, setActor] = useState<Actor>();
   const [error, setError] = useState<unknown>();
@@ -178,23 +178,21 @@ export const menuDefinitions = [
   { key: '/monitoring', label: 'Zabbix 接入', symbol: '▤', permissions: ['data.read', 'asset.onboard'] },
   { key: '/metrics', label: '数据查看', symbol: '▥', permissions: ['data.read'] },
   { key: '/admin', label: '配置', symbol: '⚙', permissions: ['investigation.create', 'user.manage', 'grant.manage', 'group.manage', 'organization.manage', 'settings.manage', 'platform.read', 'audit.read', 'rule.manage', 'model_policy.manage'] },
-  { key: '/demo', label: '演示', symbol: '▶', permissions: ['demo.operate'] },
 ];
-export function showGlobalFilters(path: string) {
-  return path.replace(/\/+$/, '') !== '/demo';
-}
+
 function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
   const can = useCan();
   const location = useLocation();
   const [search, setSearch] = useSearchParams();
   const [collapsed, setCollapsed] = useState(() => initialSidebarCollapsed(window.innerWidth));
   const [refresh, setRefresh] = useState(0);
-  const [rolling, setRolling] = useState(false);
+  const [rolling, setRolling] = useState(() => initialRollingWindow(location.pathname, location.search));
   const [logoutError, setLogoutError] = useState<unknown>();
   const initial = useMemo(
     () => ({ from: new Date(Date.now() - 3600000).toISOString(), to: new Date().toISOString() }),
     [],
   );
+  const rollingWindow = useRef(initial);
   const scope: Scope = {
     department_id: search.get('department_id') ?? undefined,
     system_id: search.get('system_id') ?? undefined,
@@ -222,25 +220,32 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
       );
   }, [initial, search, setSearch]);
   useEffect(() => {
-    if (!rolling || !showGlobalFilters(location.pathname)) return;
+    if (!rolling || location.pathname.match(/^\/(issues|investigations|evidence|events|knowledge)\/.+/)) return;
     const interval = setInterval(() => {
+      const next = { from: new Date(Date.now() - 3600000).toISOString(), to: new Date().toISOString() };
+      rollingWindow.current = next;
       setSearch(
         (p) => {
-          p.set('from', new Date(Date.now() - 3600000).toISOString());
-          p.set('to', new Date().toISOString());
+          p.set('from', next.from);
+          p.set('to', next.to);
           return p;
         },
         { replace: true },
       );
       setRefresh((v) => v + 1);
-    }, 30000);
+    }, location.pathname === '/' ? 3000 : 30000);
     return () => clearInterval(interval);
   }, [rolling, setSearch, location.pathname]);
   useEffect(() => {
     if (location.pathname.match(/^\/(issues|investigations|evidence|events|knowledge)\/.+/))
       setRolling(false);
   }, [location.pathname]);
-  const setFilter = (key: string, value?: string) =>
+  useEffect(() => {
+    if (rolling && ((search.has('from') && search.get('from') !== rollingWindow.current.from) || (search.has('to') && search.get('to') !== rollingWindow.current.to)))
+      setRolling(false);
+  }, [rolling, search]);
+  const setFilter = (key: string, value?: string) => {
+    if (key === 'from' || key === 'to') setRolling(false);
     setSearch((p) => {
       value ? p.set(key, value) : p.delete(key);
       p.delete('cursor');
@@ -251,6 +256,7 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
       if (key === 'system_id') p.delete('instance_id');
       return p;
     });
+  };
   const nav = menuDefinitions.filter((item) => can(...item.permissions));
   const username = text(
     actor.display_name ?? actor.username ?? actor.user?.display_name ?? actor.user?.username,
@@ -328,7 +334,7 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
           </Layout.Header>
           <Layout.Content className="content">
             <ErrorNotice error={logoutError} />
-            {showGlobalFilters(location.pathname) && <><div className="scopebar">
+            <div className="scopebar">
               <Space wrap>
                 <span className="filter-label">范围</span>
                 <Select
@@ -428,8 +434,8 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
                 </Button>
               </Space>
               <Space>
-                <Switch size="small" checked={rolling} onChange={setRolling} />
-                <span>{rolling ? '滚动窗口 / 30 秒' : '自动刷新关闭'}</span>
+                <Switch size="small" checked={rolling} onChange={(value) => { rollingWindow.current = { from: scope.from, to: scope.to }; setRolling(value); }} />
+                <span>{rolling ? (location.pathname === '/' ? '滚动窗口 / 3 秒' : '滚动窗口 / 30 秒') : '自动刷新关闭'}</span>
                 <Button size="small" onClick={() => setRefresh((v) => v + 1)}>
                   刷新
                 </Button>
@@ -437,13 +443,12 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
             </div>
             {new Date(scope.from) >= new Date(scope.to) ? (
               <Alert type="warning" showIcon title="时间窗无效：起始时间须早于结束时间。" />
-            ) : null}</>}
+            ) : null}
             <Routes>
               <Route path="/" element={<IntelligenceHome />} />
               <Route path="/issues/:id" element={<IssueReport />} />
               <Route path="/monitoring" element={<Monitoring />} />
               <Route path="/metrics" element={<MetricsDashboard />} />
-              <Route path="/demo" element={<Demo />} />
               <Route path="/inspection-settings" element={<ScopedRedirect to="/admin/inspection" />} />
               {['operations', 'topology', 'events', 'events/inbox', 'investigations', 'knowledge', 'tasks'].map(path => <Route key={path} path={'/' + path} element={<ScopedRedirect to="/" />} />)}
               {['assets', 'assets/new'].map(path => <Route key={path} path={'/' + path} element={<ScopedRedirect to="/monitoring" />} />)}

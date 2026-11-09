@@ -31,6 +31,7 @@ class PlatformConfig(BaseModel):
     ssh_profiles: list[dict[str, Any]] = Field(default_factory=list)
     model: dict[str, Any] = Field(default_factory=dict, repr=False)
     demo: dict[str, Any] = Field(default_factory=dict, repr=False)
+    showcase: dict[str, Any] = Field(default_factory=dict, repr=False)
     prometheus_url: str = "http://127.0.0.1:9090"
     collection_mode: Literal["zabbix_only", "legacy"] = "zabbix_only"
     session_hours: int = Field(default=8, ge=1, le=24)
@@ -50,6 +51,8 @@ class PlatformConfig(BaseModel):
         from .demo import settings
 
         settings(self)
+        from .showcase import settings as showcase_settings
+        showcase_settings(self)
         return self
 
     @property

@@ -252,6 +252,7 @@ def create_app(config=None, session_factory=None):
         "monitoring",
         "intelligence",
         "demo",
+        "showcase",
     ):
         if not (Path(__file__).parent / "routes" / f"{name}.py").is_file():
             app.state.pending_modules.append(name)

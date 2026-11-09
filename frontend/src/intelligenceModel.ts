@@ -94,6 +94,13 @@ export interface IntelligenceOverview {
   inspection: {
     status: string;
     last_completed_at?: string | null;
+    last_checked_at?: string | null;
+    next_check_at?: string | null;
+    last_observed_at?: string | null;
+    collection_seconds?: number | null;
+    signal_seconds?: number | null;
+    pacing?: { active: boolean; expires_at?: string | null };
+    task?: { id?: string; status: string; created_at?: string | null; started_at?: string | null; error_code?: string | null } | null;
     next_due_at?: string | null;
     mode?: string;
     reason?: string;
@@ -565,4 +572,9 @@ export function compactIssueNodes(
       pick((candidate) => candidate.id === node.id);
   for (const node of available) pick((candidate) => candidate.id === node.id);
   return selected;
+}
+
+export function initialRollingWindow(pathname: string, search: string): boolean {
+  const params = new URLSearchParams(search);
+  return pathname === '/' && !params.has('from') && !params.has('to');
 }

@@ -60,7 +60,7 @@ class GroupInput(BaseModel):
     items: list[ItemRef] = Field(min_length=1,max_length=32)
     relations: list[RelationInput] = Field(default_factory=list,max_length=32)
     enabled: bool = True
-    interval_seconds: int = Field(default=60,ge=30,le=3600)
+    interval_seconds: int = Field(default=60,ge=10,le=3600)
     config_revision: int | None = Field(default=None,ge=1)
 
 @router.get('/sources')

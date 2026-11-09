@@ -32,6 +32,22 @@ def policy_response(policy):
     return fields(policy, POLICY_FIELDS) if policy else None
 
 
+def effective_policy_state(db,policy,*,now=None,used=None):
+    """A former budget block is not a permanent policy state.
+
+    Derive availability from the existing UTC-day dispatch ledger, including
+    after midnight or an explicit administrator budget increase. No history or
+    limits are changed, and unrelated failure/permission states are preserved.
+    """
+    if policy.enabled and policy.status=='budget_exhausted':
+        if used is None:
+            now=now or db_now(db)
+            day=now.replace(hour=0,minute=0,second=0,microsecond=0)
+            used=db.scalar(select(func.count()).select_from(m.InspectionDispatch).where(m.InspectionDispatch.policy_id==policy.id,m.InspectionDispatch.created_at>=day)) or 0
+        if used<policy.max_daily_runs:return 'scheduled',None
+    return policy.status,policy.reason
+
+
 def save_policy(actor, body):
     identifiers = sorted(set(body.get('instance_ids', [])))
     if len(identifiers) > 100 or not identifiers and body.get('enabled', False): raise PlatformError(422, 'invalid_inspection_scope', '启用巡检需要1–100个授权对象。')
@@ -42,7 +58,7 @@ def save_policy(actor, body):
     if identifiers: require_investigation_access(actor, identifiers, mode)
     else: authorize(actor, 'investigation.create')
     if mode == 'live_redacted' and not body.get('external_confirmed'): raise PlatformError(422, 'external_confirmation_required', '自动模型巡检需要明确、可撤回的外发许可。')
-    for key, low, high, default in [('signal_interval_seconds',30,86400,300), ('ai_interval_seconds',300,86400,1800), ('cooldown_seconds',30,86400,300), ('max_daily_runs',1,100,24)]:
+    for key, low, high, default in [('signal_interval_seconds',5,86400,300), ('ai_interval_seconds',300,86400,1800), ('cooldown_seconds',30,86400,300), ('max_daily_runs',1,100,24)]:
         value = body.get(key, default)
         if isinstance(value, bool) or not isinstance(value, int) or not low <= value <= high: raise PlatformError(422, 'invalid_inspection_policy', '巡检间隔或预算超出允许范围。')
     # The owner's unique policy row serializes scheduler/API updates.
@@ -120,21 +136,41 @@ def upsert_finding(db, instance_id, category, dimension, evidence_ids, calculati
 
 
 def scan_signals(db, policy, now):
+    from .showcase import current_locks, _save
+    _save(db,'inspection-status:'+policy.id,{'last_checked_at':iso(now)})
     findings = []
     # Adopt existing rule events instead of creating a parallel issue identity.
     rows = db.execute(select(m.Event,m.Rule).join(m.EventAlert,m.EventAlert.event_id==m.Event.id).join(m.AlertOccurrence,m.AlertOccurrence.id==m.EventAlert.alert_occurrence_id).join(m.ActiveAlert,m.ActiveAlert.id==m.AlertOccurrence.active_alert_id).join(m.Rule,m.Rule.rule_version==m.ActiveAlert.rule_version).where(m.Event.instance_id.in_(policy.instance_ids),m.Event.status.notin_(TERMINAL_EVENTS),m.Rule.template.in_(RULE_CATEGORY))).all()
     for event, rule in rows:
         findings.append(upsert_finding(db,event.instance_id,RULE_CATEGORY[rule.template],'instance',[],{'rule_version':rule.rule_version},now=event.last_seen_at,existing_event=event))
     for identifier in policy.instance_ids:
+        current=current_locks(db,identifier,now)
+        if current['usable']:
+            old=db.scalar(select(m.InspectionFinding).where(m.InspectionFinding.fingerprint==digest([identifier,'lock_wait','instance'])).with_for_update())
+            previous=dict(old.calculation or {}) if old else {}
+            stamp=current['observed_at']
+            if not previous.get('observed_at') or parse_time(previous['observed_at'])<=stamp:
+                if not current['count']:
+                    if old:
+                        old.calculation={**previous,'observation_state':'recovered','observed_at':iso(stamp),'recovered_at':iso(stamp)}
+                        old.evidence_ids=current['evidence_ids']
+                else:
+                    first=previous.get('episode_started_at') if previous.get('observation_state')=='active' else iso(stamp)
+                    calculation={'row_count':current['count'],'observation_state':'active','episode_started_at':first}
+                    found=upsert_finding(db,identifier,'lock_wait','instance',current['evidence_ids'],calculation,now=stamp)
+                    found.signal_hash=digest([identifier,'lock_wait',first])
+                    found.calculation={**calculation,'observed_at':iso(stamp)}
+                    findings.append(found)
         latest = list(db.scalars(select(m.Evidence).where(m.Evidence.instance_id==identifier,m.Evidence.source_mode=='live',m.Evidence.observed_at>=now-timedelta(minutes=5)).order_by(m.Evidence.observed_at.desc()).limit(50)))
         seen = set()
         for evidence in latest:
             coverage = evidence.coverage or {}
-            if coverage.get('availability') != 'available' or evidence.truncated: continue
             payload = evidence.payload or {}
+            if evidence.source=='mysql.lock_waits': continue
             key = (evidence.source, coverage.get('itemid'))
             if key in seen: continue
             seen.add(key)
+            if coverage.get('availability') != 'available' or evidence.truncated: continue
             category, dimension, calc = None, 'instance', {}
             values = payload.get('values') or {r.get('VARIABLE_NAME'):r.get('VARIABLE_VALUE') for r in payload.get('rows',[]) if isinstance(r,dict)}
             if evidence.source == 'mysql.lock_waits' and payload.get('rows'):
@@ -317,6 +353,9 @@ def dispatch_due(factory, *, policy_id=None, force=False):
                 actor = actor_for_user(db,policy.owner_id)
                 require_investigation_access(actor,policy.instance_ids,policy.mode)
                 if policy.mode=='live_redacted' and not policy.external_confirmed: raise PlatformError(403,'inspection_consent_revoked','巡检外发许可已撤回。')
+                # Shared object locks serialize separate owners' policies, before
+                # mapping/finding locks. Task checks below use a current read.
+                list(db.scalars(select(m.Instance).where(m.Instance.id.in_(policy.instance_ids)).order_by(m.Instance.id).with_for_update()))
                 for identifier in policy.instance_ids:
                     instance = db.get(m.Instance,identifier)
                     if not group_collection_allowed(db, instance): require_legacy(db=db)
@@ -331,14 +370,22 @@ def dispatch_due(factory, *, policy_id=None, force=False):
                 policy.reason = code
                 continue
             findings = scan_signals(db,policy,now) if signal else []
-            urgent = [f for f in findings if f.signal_hash != f.dispatched_hash and (not f.last_dispatched_at or (now-f.last_dispatched_at).total_seconds()>=policy.cooldown_seconds)] if policy.urgent_enabled else []
+            urgent = [f for f in findings if f.signal_hash != f.dispatched_hash and (not f.last_dispatched_at or (now-f.last_dispatched_at).total_seconds()>=policy.cooldown_seconds or ((f.calculation or {}).get('episode_started_at') and parse_time(f.calculation['episode_started_at'])>f.last_dispatched_at))] if policy.urgent_enabled else []
             groups = fair_periodic_groups(db,policy) if periodic else []
             work = [('periodic' if not force else 'manual',group,None) for group in groups]
             if not periodic:
                 work = [('urgent',[f.instance_id],f) for f in urgent]
             day = now.replace(hour=0,minute=0,second=0,microsecond=0)
             used = db.scalar(select(func.count()).select_from(m.InspectionDispatch).where(m.InspectionDispatch.policy_id==policy.id,m.InspectionDispatch.created_at>=day)) or 0
+            policy.status,policy.reason=effective_policy_state(db,policy,now=now,used=used)
             for trigger, identifiers, finding in work:
+                # A fast sampling cadence is not a request to stack AI work.
+                # Serialize the current Zabbix group objects across policies.
+                group_ids={i for i in identifiers if (mapping_for(db,i) and mapping_for(db,i).layer=='group')}
+                active=list(db.scalars(select(m.Task).where(m.Task.queue=='ai',m.Task.status.in_(['queued','running','retry_wait'])).with_for_update().execution_options(populate_existing=True))) if group_ids else []
+                if any(group_ids.intersection((t.payload or {}).get('instance_ids',[])) for t in active):
+                    policy.status,policy.reason='queued','analysis_in_progress'
+                    continue
                 if used >= policy.max_daily_runs: policy.status,policy.reason='budget_exhausted','UTC 当日自动分析次数预算已用尽'; break
                 event_id = finding.event_id if finding else None
                 key = digest([policy.id,policy.version,trigger,identifiers,iso(now) if trigger!='urgent' else [finding.fingerprint,finding.signal_hash]])
@@ -456,15 +503,16 @@ def overview(actor, **scope):
     issues=[]
     for event in actor.db.scalars(select(m.Event).where(m.Event.instance_id.in_(visible),m.Event.status.notin_(TERMINAL_EVENTS)).order_by(m.Event.last_seen_at.desc()).limit(200)):
         finding=actor.db.scalar(select(m.InspectionFinding).where(m.InspectionFinding.event_id==event.id))
+        if finding and (finding.calculation or {}).get('observation_state')=='recovered': continue
         issues.append(issue_response(actor.db,event,finding,actor))
-    policy=actor.db.scalar(select(m.InspectionPolicy).where(m.InspectionPolicy.owner_id==actor.user_id))
+    from .showcase import inspection_projection
     objects=list(actor.db.scalars(select(m.Instance).where(m.Instance.id.in_(_visible_ids(actor,scope)),m.Instance.enabled.is_(True),m.Instance.lifecycle_state=="Active")))
     objects=[row for row in objects if row.id in current_ids]
     missing=0
     for instance in objects:
         mapping=mapping_for(actor.db,instance.id)
         if mapping: missing+=sum(c['status']!='available' for c in mapping.capabilities)
-    return {'stats':{'current':sum(i['kind']=='current' for i in issues),'risk':sum(i['kind']=='risk' for i in issues),'objects':len(objects)},'issues':issues,'inspection':{'status':policy.status if policy else 'not_configured','last_completed_at':iso(policy.last_completed_at) if policy else None,'next_due_at':iso(policy.next_ai_at) if policy and policy.enabled else None,'mode':policy.mode if policy else None,'reason':policy.reason if policy else '尚未配置自动巡检'},'coverage':{'status':'partial' if missing else 'unknown','missing_count':missing}}
+    return {'stats':{'current':sum(i['kind']=='current' for i in issues),'risk':sum(i['kind']=='risk' for i in issues),'objects':len(objects)},'issues':issues,'inspection':inspection_projection(actor.db,visible),'coverage':{'status':'partial' if missing else 'unknown','missing_count':missing}}
 
 
 def issue_detail(actor, identifier):
@@ -557,4 +605,5 @@ def policy_status(actor, policy):
         inv=actor.db.get(m.Investigation,dispatch.investigation_id)
         task=actor.db.get(m.Task,dispatch.task_id)
         runs.append({"id":inv.id,"task_id":task.id,"created_at":iso(inv.created_at),"trigger":dispatch.trigger,"status":inv.status,"mode":(task.payload or {}).get("mode"),"error_code":task.error_code})
-    return {"status":policy.status,"reason":policy.reason,"last_completed_at":iso(policy.last_completed_at),"next_due_at":iso(policy.next_ai_at) if policy.enabled else None,"runs":runs}
+    status,reason=effective_policy_state(actor.db,policy)
+    return {"status":status,"reason":reason,"last_completed_at":iso(policy.last_completed_at),"next_due_at":iso(policy.next_ai_at) if policy.enabled else None,"runs":runs}

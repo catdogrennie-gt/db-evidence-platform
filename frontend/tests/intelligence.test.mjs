@@ -1,3 +1,4 @@
+import * as intelligenceModel from '../src/intelligenceModel.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -375,4 +376,12 @@ test('a changed business scope clears stale object selections but changing time 
   const changed = scopeKey({ system_id: 'b', department_id: 'd' });
   assert.deepEqual(selectionForScope(old, same, ['object-a']), ['object-a']);
   assert.deepEqual(selectionForScope(old, changed, ['object-a']), []);
+});
+test('only the root without an explicit time selection starts in live rolling mode',()=>{
+  assert.equal(typeof intelligenceModel.initialRollingWindow, 'function');
+  const initialRollingWindow = intelligenceModel.initialRollingWindow;
+  assert.equal(initialRollingWindow('/', ''),true);
+  assert.equal(initialRollingWindow('/', '?instance_id=lab'),true);
+  for(const path of ['/metrics','/issues/id','/investigations/id']) assert.equal(initialRollingWindow(path,''),false);
+  for(const search of ['?from=2026-11-09T00:00:00Z','?to=2026-11-09T01:00:00Z','?from=a&to=b','?from=&to=']) assert.equal(initialRollingWindow('/',search),false);
 });

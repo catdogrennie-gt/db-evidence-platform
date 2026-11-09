@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="540" viewBox="0 0 1200 540" role="img" aria-labelledby="title desc">
+<title id="title">快速演示 A 与完整平台 B</title><desc id="desc">A 控制固定隔离实验并租用 B 的临时周期；Zabbix 提供实际证据，B 原有巡检与 AI 队列独立生成报告，A 只展示受限投影。</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0L8 4L0 8" fill="none" stroke="#54846b" stroke-width="1.5"/></marker></defs>
+<rect width="1200" height="540" rx="18" fill="#f3f6f1"/>
+<g font-family="Segoe UI,Microsoft YaHei,sans-serif" fill="#234236">
+<text x="42" y="48" font-size="25" font-weight="650">一个开关，两个独立职责</text><text x="42" y="78" font-size="15" fill="#6d8073">结构示意 · 实际观测、模型解释与故障执行分别留存</text>
+<rect x="40" y="111" width="320" height="190" rx="14" fill="white" stroke="#cbd9cc"/><text x="64" y="148" font-size="22" font-weight="650">A · 免登录快速演示</text><text x="64" y="183" font-size="17">固定锁等待 ON / OFF</text><text x="64" y="213" font-size="17">同页读真实状态与已有报告</text><text x="64" y="248" font-size="15" fill="#6d8073">不直接创建调查、不调用模型</text><text x="64" y="274" font-size="15" fill="#6d8073">不接受任意目标、SQL 或提示词</text>
+<rect x="440" y="111" width="320" height="190" rx="14" fill="white" stroke="#cbd9cc"/><text x="464" y="148" font-size="22" font-weight="650">隔离 MySQL + Zabbix</text><text x="464" y="183" font-size="17">合成负载，真实锁等待</text><text x="464" y="213" font-size="17">官方模板 + 扩展锁诊断</text><text x="464" y="248" font-size="15" fill="#6d8073">各监控项保留实际采样语义</text><text x="464" y="274" font-size="15" fill="#6d8073">不是所有指标都按 5 秒采样</text>
+<rect x="840" y="111" width="320" height="190" rx="14" fill="white" stroke="#cbd9cc"/><text x="864" y="148" font-size="22" font-weight="650">B · 完整只读平台</text><text x="864" y="183" font-size="17">普通采集 → 信号检查</text><text x="864" y="213" font-size="17">自主发现 → AI 队列 → 报告</text><text x="864" y="248" font-size="15" fill="#6d8073">结论、引用、冻结窗口与曲线</text><text x="864" y="274" font-size="15" fill="#6d8073">公开账号只读，无故障开关</text>
+<g fill="none" stroke="#54846b" stroke-width="2" marker-end="url(#arrow)"><path d="M360 172H430"/><path d="M760 172H830"/><path d="M1000 301V351H200V309"/></g>
+<text x="374" y="155" font-size="13">固定实验</text><text x="775" y="155" font-size="13">真实证据</text><rect x="435" y="334" width="330" height="33" rx="8" fill="#f3f6f1"/><text x="449" y="356" font-size="16">snapshot 只读投影 → A 展示</text>
+<rect x="40" y="395" width="1120" height="105" rx="13" fill="#e5eee3"/><text x="63" y="430" font-size="18" font-weight="600">A 开启时临时提频，关闭恢复基线</text><text x="63" y="461" font-size="17">B 实际采集 10 秒 / 信号检查 5 秒 · pacing 租约 45 秒 · 到期恢复当前演示基线 60 / 300 秒</text><text x="63" y="485" font-size="14" fill="#6d8073">故障连接回滚保护与提频租约独立；AI 仍遵守原巡检策略、证据与预算。</text>
+</g></svg>

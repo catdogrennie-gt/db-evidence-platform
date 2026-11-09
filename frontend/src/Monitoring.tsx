@@ -558,6 +558,7 @@ function PolicyForm() {
                     >
                       <Select
                         options={[
+                          { value: 5, label: '每 5 秒' },
                           { value: 300, label: '每 5 分钟' },
                           { value: 900, label: '每 15 分钟' },
                           { value: 1800, label: '每 30 分钟' },

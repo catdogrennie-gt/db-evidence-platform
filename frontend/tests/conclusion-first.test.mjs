@@ -40,8 +40,8 @@ test('failed and pending reports label retained output as historical', () => {
   assert.equal(typeof ui.ReportEvidence, 'function');
   for (const status of ['failed', 'analyzing']) assert.match(render(ui.ReportEvidence, { data: { ...base, status } }), /保留的历史输出/);
 });
-test('five navigation entries retain core workflow and add restricted demo', () => {
-  assert.deepEqual(app.menuDefinitions?.map(x => x.label), ['问题分析', 'Zabbix 接入', '数据查看', '配置', '演示']);
+test('four navigation entries keep the full platform separate from anonymous showcase', () => {
+  assert.deepEqual(app.menuDefinitions?.map(x => x.label), ['问题分析', 'Zabbix 接入', '数据查看', '配置']);
   assert.doesNotMatch(readFileSync('src/Monitoring.tsx', 'utf8'), /HostSelection|singleObjects|按单主机接入|\/monitoring\/objects/);
   assert.doesNotMatch(readFileSync('src/Admin.tsx', 'utf8'), /function Collection\(|<Collection|采集模板/);
 });
@@ -113,12 +113,9 @@ test('first-view summary exposes the three questions and every action before fol
   assert.match(firstView, /class="executive-questions"/);
 });
 
-test('demo navigation requires its own action and hides global filters for canonical and trailing-slash routes', () => {
-  assert.deepEqual(app.menuDefinitions.find(x => x.key === '/demo')?.permissions, ['demo.operate']);
-  assert.equal(typeof app.showGlobalFilters, 'function');
-  assert.equal(app.showGlobalFilters('/demo'), false);
-  assert.equal(app.showGlobalFilters('/demo/'), false);
-  assert.equal(app.showGlobalFilters('/metrics'), true);
+test('the full platform has no fault-control route or navigation', () => {
+  assert.equal(app.menuDefinitions.some(x => x.key === '/demo'), false);
+  assert.doesNotMatch(readFileSync('src/App.tsx', 'utf8'), /<Demo|path="\/demo"/);
 });
 test('unfinished historical reports without summaries do not claim to be legacy reports', () => {
   for (const status of ['failed', 'queued', 'analyzing']) {
@@ -135,3 +132,9 @@ test('completed legacy historical reports keep the legacy summary label', () => 
   assert.doesNotMatch(html, /本轮未生成结论摘要/);
   assert.match(html, /历史原文仍在/);
 });
+const hooks = await server.ssrLoadModule('/src/hooks.tsx');
+test('read-only visitors cannot see inspection editing controls', () => {
+  const html = renderToStaticMarkup(h(MemoryRouter, null, h(hooks.SessionContext.Provider, { value: { actor: { permissions: ['data.read', 'event.read'] }, reload() {} } }, h(ui.IntelligenceHome))));
+  assert.doesNotMatch(html, /巡检设置/);
+});
+test('inspection activity shows only actual observed check task timestamps and cadence',()=>{assert.equal(typeof ui.InspectionActivity,'function');const html=render(ui.InspectionActivity,{inspection:{status:'active',last_observed_at:'2026-11-09T00:00:00Z',last_checked_at:'2026-11-09T00:00:05Z',collection_seconds:10,signal_seconds:5,task:{status:'analyzing',created_at:'2026-11-09T00:00:06Z'},pacing:{active:true}}});for(const text of ['实际最近采样','最近信号检查','2026-11-09T00:00:05Z','模型分析中','10 秒','5 秒','临时提频'])assert.ok(html.includes(text),text);const empty=render(ui.InspectionActivity,{inspection:{status:'active'}});assert.match(empty,/尚无 AI 任务/);assert.doesNotMatch(empty,/10 秒|已确认健康/);});

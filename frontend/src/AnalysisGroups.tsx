@@ -236,7 +236,7 @@ function GroupEditor({ group, sources, sourcesLoading, close, saved }: {
         </div>
         <Form.Item name="description" label="分析目标（可选）"><Input.TextArea placeholder="例如：关注业务响应变慢时，数据库负载与主机资源是否同时变化。" rows={3} maxLength={1000} showCount /></Form.Item>
         <div className="intel-form-pair">
-          <Form.Item name="interval_seconds" label="数据采集周期（秒）" rules={[{ required: true }]} extra="分析周期在巡检策略中单独配置。"><InputNumber min={30} max={3600} step={30} /></Form.Item>
+          <Form.Item name="interval_seconds" label="数据采集周期（秒）" rules={[{ required: true }]} extra="分析周期在巡检策略中单独配置。"><InputNumber min={10} max={3600} step={5} /></Form.Item>
           <Form.Item name="enabled" label="保存后启用数据采集" valuePropName="checked"><Switch /></Form.Item>
         </div>
       </div>
