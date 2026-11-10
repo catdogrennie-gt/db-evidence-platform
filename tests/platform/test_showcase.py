@@ -271,3 +271,63 @@ def test_completed_inspection_task_remains_visible_without_overriding_policy_sta
     assert projection['task']['started_at'] is not None
     assert projection['status']=='scheduled'
     assert inspection_projection(db,{e['b'].id},policy=e['policy'])['task'] is None
+
+
+def test_source_offline_clears_after_fresh_normal_scan_without_dispatch(showcase_env):
+    from platform_app.intelligence import dispatch_due
+
+    e = showcase_env
+    db = e['db']
+    e['factory'].kw['info'] = {'platform_config': e['config']}
+    snapshot_row(e, [])
+    policy = e['policy']
+    original_version = policy.version
+    original_budget = policy.max_daily_runs
+    investigation_count = db.scalar(select(func.count()).select_from(m.Investigation))
+
+    e['source'].status = 'failed'
+    db.commit()
+    assert dispatch_due(e['factory']) == []
+    db.expire_all()
+    assert policy.status == 'source_offline'
+
+    e['source'].status = 'ready'
+    e['mapping'].last_observed_at = utcnow() - timedelta(minutes=6)
+    policy.next_signal_at = utcnow() - timedelta(seconds=1)
+    db.commit()
+    assert dispatch_due(e['factory']) == []
+    db.expire_all()
+    assert policy.status == 'source_offline'
+
+    e['mapping'].last_observed_at = utcnow()
+    policy.next_signal_at = utcnow() - timedelta(seconds=1)
+    db.commit()
+    assert dispatch_due(e['factory']) == []
+    db.expire_all()
+    assert policy.status == 'scheduled'
+    assert policy.reason is None
+    assert policy.version == original_version
+    assert policy.max_daily_runs == original_budget
+    assert db.scalar(select(func.count()).select_from(m.InspectionDispatch)) == 0
+    assert db.scalar(select(func.count()).select_from(m.Investigation)) == investigation_count
+    check = db.get(m.PlatformSetting, 'inspection-status:' + policy.id)
+    assert check.value['last_checked_at'] is not None
+
+
+@pytest.mark.parametrize('disabled_target', ['policy', 'instance'])
+def test_source_offline_does_not_clear_before_disabled_checks(showcase_env, disabled_target):
+    from platform_app.intelligence import dispatch_due
+
+    e = showcase_env
+    db = e['db']
+    e['factory'].kw['info'] = {'platform_config': e['config']}
+    e['policy'].status = 'source_offline'
+    e['policy'].reason = 'source_offline'
+    target = e['policy'] if disabled_target == 'policy' else e['a']
+    target.enabled = False
+    db.commit()
+
+    assert dispatch_due(e['factory']) == []
+    db.expire_all()
+    assert e['policy'].status != 'scheduled'
+    assert db.scalar(select(func.count()).select_from(m.InspectionDispatch)) == 0

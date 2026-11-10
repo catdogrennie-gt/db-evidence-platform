@@ -4,8 +4,8 @@
 
 | 入口 | 访问方式 | 用途 |
 | --- | --- | --- |
-| [A · 免登录快速演示](https://miles-what-eleven-ent.trycloudflare.com) | 无需账号 | 开启 / 关闭固定锁等待，同页查看 B 的真实观测、发现、AI 报告与冻结曲线 |
-| [B · 完整运维平台](https://byte-texts-allergy-examples.trycloudflare.com) | 账号 **`demo`**，密码 **`EvidenceDemo-2026!`** | 只读查看问题分析、Zabbix 对象、数据和历史报告 |
+| [A · 免登录快速演示](https://rural-surrounding-obviously-wellness.trycloudflare.com) | 无需账号 | 开启 / 关闭固定锁等待，同页查看 B 的真实观测、发现、AI 报告与冻结曲线 |
+| [B · 完整运维平台](https://deliver-doubt-epson-document.trycloudflare.com) | 账号 **`demo`**，密码 **`EvidenceDemo-2026!`** | 只读查看问题分析、Zabbix 对象、数据和历史报告 |
 
 两个地址均为临时隧道，依赖演示电脑与服务在线，可能变化，不承诺持续可用。公开密码只用于此部署的只读演示身份，新部署没有通用默认密码。该身份仅有 `data.read`、`event.read`、`knowledge.read` 及固定对象范围，不能修改配置、创建分析或执行故障。
 

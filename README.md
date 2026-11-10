@@ -12,8 +12,8 @@ An evidence-driven MySQL inspection and investigation platform.
 
 | 入口 | 直接访问 | 账号 |
 | --- | --- | --- |
-| **A · 免登录快速功能演示** | **[打开真实锁等待演示](https://miles-what-eleven-ent.trycloudflare.com)** | **无需登录** |
-| **B · 原有完整运维平台** | **[打开完整只读平台](https://byte-texts-allergy-examples.trycloudflare.com)** | **`demo` / `EvidenceDemo-2026!`** |
+| **A · 免登录快速功能演示** | **[打开真实锁等待演示](https://rural-surrounding-obviously-wellness.trycloudflare.com)** | **无需登录** |
+| **B · 原有完整运维平台** | **[打开完整只读平台](https://deliver-doubt-epson-document.trycloudflare.com)** | **`demo` / `EvidenceDemo-2026!`** |
 
 A 提供一个固定隔离 MySQL 锁等待开关，同页展示 B 的真实监控、发现状态、AI 报告及冻结曲线。B 保留完整系统，以只读演示身份查看问题、对象、证据和历史；公开身份只有 `data.read`、`event.read`、`knowledge.read` 及固定对象范围，不提供故障控制或配置写入。
 

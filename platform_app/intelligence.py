@@ -369,6 +369,8 @@ def dispatch_due(factory, *, policy_id=None, force=False):
                 policy.status = 'source_offline' if code=='source_offline' else 'object_paused' if code=='object_paused' else 'consent_required' if code=='inspection_consent_revoked' else 'permission_denied'
                 policy.reason = code
                 continue
+            if policy.status == 'source_offline':
+                policy.status, policy.reason = 'scheduled', None
             findings = scan_signals(db,policy,now) if signal else []
             urgent = [f for f in findings if f.signal_hash != f.dispatched_hash and (not f.last_dispatched_at or (now-f.last_dispatched_at).total_seconds()>=policy.cooldown_seconds or ((f.calculation or {}).get('episode_started_at') and parse_time(f.calculation['episode_started_at'])>f.last_dispatched_at))] if policy.urgent_enabled else []
             groups = fair_periodic_groups(db,policy) if periodic else []
