@@ -1,11 +1,88 @@
 """Compact, citation-preserving model context derived only from frozen values."""
 from collections import Counter
 from copy import deepcopy
+from datetime import datetime
+import hashlib
 import json
 from .common import iso, parse_time, PlatformError
 from .zabbix_items import safe_item,safe_relations
 
-SERIES_COLUMNS=['evidence_id','resource','hostid','itemid','name','key','unit','sample_count','first','last','min','max','missing_count','complete','reason_codes','last_time','original_point_count','sampling_method','value_semantics','semantics_source']
+SERIES_COLUMNS=['evidence_id','resource','hostid','itemid','name','key','unit','sample_count','first','last','min','max','missing_count','complete','reason_codes','last_time','original_point_count','sampling_method','value_semantics','semantics_source','first_time']
+_WINDOW_UNSET=object()
+
+
+def _numeric_identity(resource,hostid,itemid):
+    source_id=resource.get('source_id')
+    if not all(isinstance(value,str) and value for value in (source_id,hostid,itemid)):return None
+    source='zabbix.item.numeric:'+hashlib.sha256(f'{source_id}:{hostid}:{itemid}'.encode()).hexdigest()[:24]
+    return resource.get('instance_id'),source,hostid,itemid
+
+
+def _sampled_numeric_rows(series):
+    columns=(series or {}).get('columns',[])
+    if 'sample_count' not in columns:return []
+    index=columns.index('sample_count')
+    return [row for row in (series or {}).get('rows',[])
+            if len(row)>index and type(row[index]) is int and row[index]>0]
+
+
+def compact_numeric_evidence(item, series=None, *, window_start=_WINDOW_UNSET, window_end=_WINDOW_UNSET):
+    """Bound an already-authorized projection, never its frozen source payload.
+
+    Counts and endpoints are recorded before display sampling. Upstream gaps
+    remain in coverage; omitting middle points here adds no upstream gap.
+    Compacted projections may only re-enter the same frozen window. A changed
+    window must start from the original Evidence projection, not its subset.
+    """
+    item=deepcopy(item); data=item.get('data') or {}
+    if (not str(item.get('source','')).startswith('zabbix.item.numeric:')
+            or not isinstance(data.get('rows'),list) or data.get('observation_unavailable')
+            or data.get('text_omitted')): return item
+    if data.get('projection_scope')=='retained_samples_subset_not_upstream_gap': return item
+    rows=data['rows']
+    bounded=window_start is not _WINDOW_UNSET or window_end is not _WINDOW_UNSET
+    if bounded:
+        # ORM boundaries are UTC-naive datetimes; external strings must carry
+        # their own timezone. An invalid or partial window never means all time.
+        try:
+            lower=parse_time(iso(window_start) if isinstance(window_start,datetime) else window_start)
+            upper=parse_time(iso(window_end) if isinstance(window_end,datetime) else window_end)
+            if lower>=upper:raise ValueError()
+        except (PlatformError,AttributeError,ValueError,TypeError):
+            rows=[]
+        else:
+            retained=[]
+            for point in rows:
+                try:stamp=parse_time(point.get('time'))
+                except (PlatformError,AttributeError,ValueError,TypeError):continue
+                if lower<=stamp<upper:retained.append(point)
+            rows=retained
+        data['row_count']=len(rows)
+        if not rows:
+            data['observation_unavailable']=True
+            item['coverage']=dict(item.get('coverage') or {},complete=False,availability='unknown')
+    count=len(rows)
+    meta=data.get('item') or {}
+    keep=('hostid','itemid','units','value_semantics','semantics_source','interval','interval_verified','history_semantics')
+    data['item']={k:meta[k] for k in keep if k in meta}
+    resources=(series or {}).get('resources',[])
+    identity=(item.get('instance_id'),item.get('source'),meta.get('hostid'),meta.get('itemid'))
+    related=next((r[0] for r in _sampled_numeric_rows(series)
+                  if _numeric_identity(resources[r[1]],r[2],r[3])==identity),None)
+    if related:
+        data['numeric_series_ref']=related
+        # Scheduling labels are not measurement values. Keep this observation's
+        # identity, units, semantics and names even if its window is later
+        # omitted; a removed window must never leave a metadata alias.
+        for key in ('interval','interval_verified','history_semantics'):
+            data['item'].pop(key,None)
+    for key,limit in [('name',40),('key',56)]:
+        if key in meta:data['item'][key]=str(meta[key])[:limit]
+    data.update(sample_count=count,first_time=rows[0].get('time') if rows else None,
+        last_time=rows[-1].get('time') if rows else None,
+        rows=rows[:1]+rows[-3:] if count>4 else rows,
+        rows_omitted=max(0,count-4),projection_scope='retained_samples_subset_not_upstream_gap')
+    return item
 
 
 def _snapshot_time(item):
@@ -23,6 +100,9 @@ def refresh_snapshot_chronology(container, *, item_key='evidence', sort=False):
     buckets = {}
     invalid = 0
     for item in rows:
+        # A retained history curve is not an empty/nonempty SQL/log snapshot.
+        if (str(item.get('source','')).startswith('zabbix.item.numeric:')
+                or item.get('source')=='mysql.statement_digest'): continue
         data = item.get('data') or {}
         if data.get('text_omitted') or data.get('observation_unavailable'): continue
         count = data.get('row_count')
@@ -86,11 +166,16 @@ def add_series(series,metric,payload,values):
     reasons=sorted(set(str(g.get('reason',g.get('reason_code','unknown'))) if isinstance(g,dict) else str(g) for g in [*(payload.get('gaps') or []),*(coverage.get('reason_codes') or [])]))[:3]
     valid=[p for p in payload.get('points',[]) if isinstance(p.get('value'),(int,float)) and p.get('validity','valid')=='valid']
     sampling=coverage.get('sampling') or {}
-    series['rows'].append(['manifest:'+metric.id,series['resources'].index(resource),item.get('hostid'),item.get('itemid'),item.get('name','')[:40],item.get('key','')[:56],item.get('units','')[:24],len(values),values[0] if values else None,values[-1] if values else None,min(values) if values else None,max(values) if values else None,len(payload.get('points',[]))-len(values),coverage.get('complete') is True,reasons,valid[-1]['time'] if valid else None,sampling.get('original_point_count',len(payload.get('points',[]))),sampling.get('method','none'),item.get('value_semantics','unknown'),item.get('semantics_source','unverified')])
+    series['rows'].append(['manifest:'+metric.id,series['resources'].index(resource),item.get('hostid'),item.get('itemid'),item.get('name','')[:40],item.get('key','')[:56],item.get('units','')[:24],len(values),values[0] if values else None,values[-1] if values else None,min(values) if values else None,max(values) if values else None,len(payload.get('points',[]))-len(values),coverage.get('complete') is True,reasons,valid[-1]['time'] if valid else None,sampling.get('original_point_count',len(payload.get('points',[]))),sampling.get('method','none'),item.get('value_semantics','unknown'),item.get('semantics_source','unverified'),valid[0]['time'] if valid else None])
 
 
 def compact_coverage(coverage):
     coverage=coverage or {}; reasons=Counter()
+    if 'gap_reason_counts' in coverage:
+        return {key:deepcopy(value) for key,value in coverage.items() if key in (
+            'complete','truncated','manifest_id','initial_evidence_bounded','gaps',
+            'gap_reason_counts','gap_count','gap_reasons_omitted','manifest_source_count',
+            'duplicate_numeric_projections_omitted')}
     for value in coverage.get('gaps',[]):
         reason=value.get('reason_code',value.get('reason','unknown')) if isinstance(value,dict) else str(value).rsplit(':',1)[-1]
         reasons[str(reason)[:80]]+=1
@@ -105,6 +190,106 @@ def context_refs(bundle):
     return {item['evidence_id'] for item in bundle.get('evidence',[])} | {row[0] for row in (bundle.get('numeric_series') or {}).get('rows',[])}
 
 
+def trim_numeric_summary(bundle):
+    """Prefer coverage of distinct dimensions before duplicate trigger windows."""
+    series=bundle.get('numeric_series') or {};rows=series.get('rows',[])
+    if not rows:return False
+    columns=bundle.get('numeric_observation_columns',[])
+    index=columns.index('data.numeric_series_ref') if 'data.numeric_series_ref' in columns else None
+    observations=[item['numeric_observation'] for item in bundle.get('evidence',[])
+                  if isinstance(item.get('numeric_observation'),list)]
+    represented={row[index] for row in observations if index is not None and row[index] is not None}
+    candidates=[i for i,row in enumerate(rows) if row[0] in represented] or list(range(len(rows)))
+    counts=Counter((rows[i][1],rows[i][2]) for i in candidates)
+    largest=max(counts,key=counts.get)
+    selected=next(i for i in reversed(candidates) if (rows[i][1],rows[i][2])==largest)
+    ref=rows.pop(selected)[0]
+    for row in observations:
+        if index is not None and row[index]==ref:row[index]=None
+    for position,name in enumerate(series.get('columns',[])):
+        if not name.endswith('_ref'):continue
+        key=name[:-4]+'_dictionary';dictionary=series.get(key)
+        if not isinstance(dictionary,list):continue
+        used=sorted({row[position] for row in rows})
+        replacements={old:new for new,old in enumerate(used)}
+        series[key]=[dictionary[old] for old in used]
+        for row in rows:row[position]=replacements[row[position]]
+    series['omitted_count']=series.get('omitted_count',0)+1
+    return True
+
+
+def _encode_numeric_context(initial):
+    """Intern repeated field names/times, not observations or measurement values.
+
+    Numeric observations retain their original evidence IDs. SQL/log/lock
+    objects deliberately retain their existing, separately scoped projection.
+    """
+    def flatten(value,prefix=''):
+        result={}
+        for key,child in value.items():
+            path=prefix+key
+            if isinstance(child,dict):result.update(flatten(child,path+'.'))
+            else:result[path]=child
+        return result
+    def time_ref(value):
+        times=initial.setdefault('numeric_time_dictionary',[])
+        if value not in times:times.append(value)
+        return times.index(value)
+    def intern_values(columns,rows,label):
+        dictionaries={}
+        for index,key in enumerate(list(columns)):
+            if key.endswith('_ref'):continue
+            values=[row[index] for row in rows]
+            if not values or not all(isinstance(value,str) for value in values):continue
+            dictionary=list(dict.fromkeys(values)); refs=[dictionary.index(value) for value in values]
+            # Do not replace short labels or unique values with larger aliases.
+            before=len(json.dumps(values,ensure_ascii=False))
+            after=len(json.dumps(refs))+len(json.dumps({key:dictionary},ensure_ascii=False))+40
+            if after>=before:continue
+            for row,ref in zip(rows,refs):row[index]=ref
+            columns[index]=key+'_ref';dictionaries[key]=dictionary
+        if dictionaries:initial[label]=dictionaries
+    numeric=[item for item in initial.get('evidence',[])
+             if str(item.get('source','')).startswith('zabbix.item.numeric:')
+             and (item.get('data') or {}).get('projection_scope')=='retained_samples_subset_not_upstream_gap']
+    if numeric:
+        flattened=[]
+        for item in numeric:
+            values=flatten({key:value for key,value in item.items() if key!='evidence_id'})
+            for key in ('observed_at','data.first_time','data.last_time'):
+                if isinstance(values.get(key),str):values[key+'_ref']=time_ref(values.pop(key))
+            points=values.get('data.rows',[])
+            values['data.rows']=[]
+            for point in points:
+                point=dict(point)
+                if isinstance(point.get('time'),str):point['time_ref']=time_ref(point.pop('time'))
+                values['data.rows'].append(point)
+            flattened.append(values)
+        columns=sorted({key for value in flattened for key in value})
+        by_id={item['evidence_id']:value for item,value in zip(numeric,flattened)}
+        encoded=[[by_id[item['evidence_id']].get(key) for key in columns] for item in numeric]
+        intern_values(columns,encoded,'numeric_observation_dictionaries')
+        initial['numeric_observation_columns']=columns
+        by_id=dict(zip((item['evidence_id'] for item in numeric),encoded))
+        initial['evidence']=[{'evidence_id':item['evidence_id'],
+                             'numeric_observation':by_id[item['evidence_id']]}
+                            if item['evidence_id'] in by_id else item for item in initial['evidence']]
+    calculations=[]
+    for signal in initial.get('inspection_signals',[]):
+        if not isinstance(signal.get('calculation'),dict):continue
+        values=flatten(signal['calculation'])
+        for key in list(values):
+            if (key in ('observed_at','episode_started_at','returned_at') or key.endswith(('.from','.to'))) and isinstance(values[key],str):
+                values[key+'_ref']=time_ref(values.pop(key))
+        calculations.append((signal,values))
+    if calculations:
+        columns=sorted({key for _,value in calculations for key in value})
+        encoded=[[value.get(key) for key in columns] for _,value in calculations]
+        intern_values(columns,encoded,'signal_calculation_dictionaries')
+        initial['signal_calculation_columns']=columns
+        for (signal,_),row in zip(calculations,encoded):signal['calculation']=row
+
+
 def compact_initial(bundle):
     initial=deepcopy(bundle); initial['coverage']=compact_coverage(initial.get('coverage'))
     series=initial.get('numeric_series') or {}; refs={r[0] for r in series.get('rows',[])}
@@ -112,7 +297,7 @@ def compact_initial(bundle):
     # making partial coverage appear complete. Each *_ref is an explicit index
     # into its dictionary; the frozen manifest itself remains unchanged.
     columns=series.get('columns',[])
-    for name in ('reason_codes','sampling_method','semantics_source'):
+    for name in ('reason_codes','sampling_method','semantics_source','first_time','last_time'):
         if name not in columns: continue
         index=columns.index(name); dictionary=[]
         for row in series.get('rows',[]):
@@ -123,11 +308,26 @@ def compact_initial(bundle):
             columns[index]=name+'_ref'
             series[name+'_dictionary']=dictionary
     resources=series.get('resources',[])
-    identities={(resources[r[1]]['instance_id'],r[2],r[3]) for r in series.get('rows',[])}
-    original=initial.get('evidence',[])
+    identities={_numeric_identity(resources[r[1]],r[2],r[3]) for r in _sampled_numeric_rows(series)}
+    identities.discard(None)
+    window={'window_start':initial.get('from'),'window_end':initial.get('to')} if 'from' in initial or 'to' in initial else {}
+    original=[compact_numeric_evidence(item,series,**window) for item in initial.get('evidence',[])]
+    for item in original:
+        if str(item.get('source','')).startswith('zabbix.item.numeric:'):continue
+        data=item.get('data') or {};meta=data.get('item')
+        if isinstance(meta,dict):
+            data['item']={key:value for key,value in meta.items() if key in (
+                'hostid','itemid','name','key','units','value_semantics','semantics_source',
+                'interval','interval_verified','history_semantics')}
     trigger_refs={ref for signal in initial.get('inspection_signals',[]) for ref in signal.get('evidence_ids',[])}
-    initial['evidence']=[item for item in original if item['evidence_id'] in trigger_refs or (item['evidence_id'] not in refs and not (str(item.get('source','')).startswith('zabbix.item.numeric:') and (item.get('instance_id'),(item.get('data') or {}).get('item',{}).get('hostid'),(item.get('data') or {}).get('item',{}).get('itemid')) in identities))]
-    initial['coverage']['duplicate_numeric_projections_omitted']=len(original)-len(initial['evidence'])
+    initial['evidence']=[item for item in original if item['evidence_id'] in trigger_refs or (item['evidence_id'] not in refs and not (str(item.get('source','')).startswith('zabbix.item.numeric:') and (item.get('instance_id'),item.get('source'),(item.get('data') or {}).get('item',{}).get('hostid'),(item.get('data') or {}).get('item',{}).get('itemid')) in identities))]
+    initial['coverage']['duplicate_numeric_projections_omitted']=initial['coverage'].get('duplicate_numeric_projections_omitted',0)+len(original)-len(initial['evidence'])
+    for signal in initial.get('inspection_signals',[]):
+        # Persistence keys identify internal settings, not measured mechanisms.
+        if isinstance(signal.get('calculation'),dict):
+            for key in ('reference_key','source_id','mapping_version','config_revision','calculation'):
+                signal['calculation'].pop(key,None)
+    _encode_numeric_context(initial)
     return initial
 
 
@@ -151,9 +351,16 @@ def compact_tool_item(item):
         result['points_omitted']=item.get('points_omitted',0)
     elif 'data' in item:
         data=item['data']; result['data']={k:v for k,v in data.items() if k in ('row_count','event_count','observation_unavailable','text_omitted','timer_unit','snapshot_scope','window','values')}
+        numeric_subset=(str(item.get('source','')).startswith('zabbix.item.numeric:')
+                        and data.get('projection_scope')=='retained_samples_subset_not_upstream_gap')
+        if numeric_subset:
+            result['data'].update({k:data[k] for k in ('sample_count','first_time','last_time','projection_scope') if k in data})
         if isinstance(data.get('item'),dict):
-            result['data']['item']={k:v for k,v in data['item'].items() if k in ('hostid','itemid') and isinstance(v,str)}
-        if isinstance(data.get('rows'),list): result['data']['rows']=data['rows'][:2]; result['data']['rows_omitted']=max(0,len(data['rows'])-2)
+            metadata=('hostid','itemid','units','value_semantics','semantics_source') if numeric_subset else ('hostid','itemid')
+            result['data']['item']={k:v for k,v in data['item'].items() if k in metadata and isinstance(v,str)}
+        if isinstance(data.get('rows'),list):
+            result['data']['rows']=data['rows'][:2]
+            result['data']['rows_omitted']=max(0,len(data['rows'])-2)+(data.get('rows_omitted',0) if numeric_subset else 0)
     return result
 
 

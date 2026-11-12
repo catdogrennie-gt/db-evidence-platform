@@ -315,7 +315,8 @@ def test_real_model_payload_keeps_large_group_numeric_context_and_frozen_tool(gr
             assert {row[columns.index('hostid')] for row in rows}=={'101','102'}
             assert {row[columns.index('itemid')] for row in rows}.issubset({str(100+i) for i in range(18)})
             assert all(row[columns.index('last')]==(None if missing_last and row[columns.index('itemid')]=='117' else 17) for row in rows)
-            assert all(row[columns.index('last_time')] for row in rows if row[columns.index('sample_count')])
+            assert all(series['last_time_dictionary'][row[columns.index('last_time_ref')]]
+                       for row in rows if row[columns.index('sample_count')])
             assert series['omitted_count']==18-len(rows)
             if active_lock:
                 locks=[item for item in initial['evidence'] if item.get('selection_reason')=='nonempty_lock_snapshot']

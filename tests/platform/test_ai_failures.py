@@ -146,7 +146,8 @@ def test_live_report_is_persisted_with_real_call_audit_and_projected_input(ai_en
     assert result.status == "completed" and result.conclusion_type == "live_model"
     assert len(captured) == 1
     assert result.report["executive_summary"]["joint_root_cause"]["status"] == "insufficient_evidence"
-    assert result.report["prompt_version"] == "evidence-investigation-v3.7"
+    from platform_app.investigations import PROMPT_VERSION
+    assert result.report["prompt_version"] == PROMPT_VERSION
     assert all(
         s not in captured[0]
         for s in (

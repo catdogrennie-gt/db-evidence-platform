@@ -595,12 +595,19 @@ class ToolBroker:
                     )
                 if TOOL_SOURCES[name] is not None:
                     query = query.where(Evidence.source.in_(TOOL_SOURCES[name]))
-                items = [
-                    project_evidence(r)
-                    for r in db.scalars(
-                        query.order_by(Evidence.observed_at, Evidence.id).limit(args.limit)
-                    )
-                ]
+                items = []
+                for row in db.scalars(
+                    query.order_by(Evidence.observed_at, Evidence.id).limit(args.limit)
+                ):
+                    projected = project_evidence(row)
+                    if row.source.startswith('zabbix.item.numeric:'):
+                        # observed_at bounds the snapshot, not its history rows.
+                        # Clip before counting/sampling, including narrower tool windows.
+                        from .model_context import compact_numeric_evidence
+                        projected = compact_numeric_evidence(
+                            projected, window_start=lower, window_end=upper
+                        )
+                    items.append(projected)
             limited = []
             truncated = False
             for item in items:

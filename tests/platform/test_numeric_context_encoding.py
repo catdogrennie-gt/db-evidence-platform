@@ -13,7 +13,8 @@ def test_compact_numeric_metadata_is_lossless_and_does_not_mutate_frozen_project
         [f'manifest:{i}', 0, str(101+i%2), str(50000+i), 'Observed metric '+str(i),
          'application.metric_'+str(i), 'ms', 400, 5, 20, 3, 24, 2, False,
          ['external_history_partial', 'missing_samples', 'source_window_point_budget'],
-         '2026-11-12T08:51:31Z', 720, 'original_point_bucket_minmax', 'gauge', 'zabbix_tag']
+         '2026-11-12T08:51:31Z', 720, 'original_point_bucket_minmax', 'gauge', 'zabbix_tag',
+         '2026-11-12T08:01:31Z']
         for i in range(32)
     ]
     bundle = {'coverage': {}, 'evidence': [], 'numeric_series': {
@@ -27,7 +28,8 @@ def test_compact_numeric_metadata_is_lossless_and_does_not_mutate_frozen_project
     assert len(json.dumps(series)) < len(json.dumps(before['numeric_series'])) - 2500
     for original, encoded in zip(rows, series['rows']):
         values = dict(zip(series['columns'], encoded))
-        for field in ('reason_codes', 'sampling_method', 'semantics_source'):
+        assert len(encoded)==len(series['columns'])==len(original)
+        for field in ('reason_codes', 'sampling_method', 'semantics_source','first_time','last_time'):
             index = values.pop(field+'_ref')
             assert type(index) is int and index >= 0
             values[field] = series[field+'_dictionary'][index]
@@ -38,7 +40,7 @@ def test_compaction_can_read_an_already_compacted_projection_without_encoding_tw
     bundle={'coverage':{},'evidence':[], 'numeric_series':{
         'columns':list(SERIES_COLUMNS), 'resources':[{'instance_id':'scope-1'}],
         'rows':[['manifest:one',0,'101','501','Metric','key','ms',3,1,2,1,2,0,True,[],
-                 '2026-11-12T08:51:31Z',3,'none','gauge','zabbix_tag']], 'omitted_count':0}}
+                 '2026-11-12T08:51:31Z',3,'none','gauge','zabbix_tag','2026-11-12T08:41:31Z']], 'omitted_count':0}}
     result=compact_initial(bundle)
     assert compact_initial(result)['numeric_series']==result['numeric_series']
 
