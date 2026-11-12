@@ -44,19 +44,7 @@
 
 ## 系统怎么工作
 
-```mermaid
-flowchart LR
-    M["MySQL / 服务器 / 应用"] --> Z["Zabbix 采集与保存"]
-    Z --> W["平台读取所选监控项"]
-    W --> C["定时检查与异常发现"]
-    C --> A["AI 关联分析"]
-    A --> R["问题结论、图表与证据"]
-    W --> D[("独立 MySQL 控制库")]
-    C --> D
-    A --> D
-    D --> U["Web 界面"]
-    R --> U
-```
+![当前架构：Zabbix 采集、平台巡检、受限 AI 分析与 Web 展示](docs/images/platform-architecture.svg)
 
 平台通过 **Zabbix API** 读取数据，不需要业务数据库口令。配置好分析范围和周期后，采集与分析在后台独立运行；关闭浏览器也会继续检查。AI 分析使用当次保存的数据窗口，旧报告不会随着新采样被改写。
 
@@ -115,6 +103,16 @@ $platformConfig = 'D:\Private\DBEvidence\config.json'
 
 ## 项目开发说明
 
+### 方案如何演进
+
+项目经历了 **自定义独立平台 → Grafana 插件探索 → Zabbix + 原独立平台** 的调整。最终将采集交给成熟监控，保留并增强原平台的调查、权限、报告和证据能力。
+
+![项目演化：每阶段的目标、问题和取舍](docs/images/project-evolution.svg)
+
+每阶段遇到的问题、改造依据和后续验证见[项目演化记录](docs/project-evolution.md)。
+
+### 开发方式与时间
+
 - **性质**：个人项目，由本人主导需求、数据库运维场景、方案取舍与验收。
 - **开发助手**：使用 Codex 辅助设计、前后端编码、调试、测试和文档；参考 Superpowers 与 OpenAI Skills 的工程方法。
 - **开发与验证工具**：pytest、前端测试、浏览器验收、Git / GitHub；用 VMware、Docker 和隔离 MySQL 验证真实采集及故障场景。DeepSeek 是平台运行时的分析模型。
@@ -124,6 +122,7 @@ $platformConfig = 'D:\Private\DBEvidence\config.json'
 
 ## 更多文档
 
-- [技术架构与开发过程](docs/project-overview.md) · [部署与运维](docs/platform/07-operations.md) · [使用指南](docs/user-guide.md)
+- [项目演化与取舍](docs/project-evolution.md) · [技术架构与开发过程](docs/project-overview.md)
+- [部署与运维](docs/platform/07-operations.md) · [使用指南](docs/user-guide.md)
 - [官方 Zabbix 模板与诊断扩展](docs/zabbix-official-setup.md) · [真实实验验收](docs/acceptance-quick-showcase.md)
 - [独立故障实验系统 SignalLens Lab](https://github.com/catdogrennie-gt/SignalLens-Lab) · [历史版本](docs/releases/README.md)

@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="850" viewBox="0 0 1280 850" role="img" aria-labelledby="title desc">
+<title id="title">从监控数据到问题结论</title>
+<desc id="desc">后台持续运行；人员先看结论，再核对依据并决定处理。</desc>
+<defs>
+<marker id="blue" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto-start-reverse" markerUnits="strokeWidth"><path d="M 0 0 L 8 4.5 L 0 9 Z" fill="#2563eb"/></marker>
+<marker id="teal" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto-start-reverse" markerUnits="strokeWidth"><path d="M 0 0 L 8 4.5 L 0 9 Z" fill="#0f766e"/></marker>
+<marker id="amber" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto-start-reverse" markerUnits="strokeWidth"><path d="M 0 0 L 8 4.5 L 0 9 Z" fill="#a45b13"/></marker>
+</defs>
+<g font-family="Microsoft YaHei UI, Microsoft YaHei, Noto Sans CJK SC, PingFang SC, system-ui, sans-serif">
+<rect x="0" y="0" width="1280" height="850" rx="0" fill="#f5f8fc" stroke="none"/>
+<text x="48" y="57" font-size="29" fill="#14263f" font-weight="700" text-anchor="start">从监控数据到问题结论</text>
+<text x="48" y="88" font-size="17" fill="#52647b" font-weight="400" text-anchor="start">后台持续运行；人员先看结论，再核对依据并决定处理。</text>
+<rect x="1032" y="32" width="200" height="36" rx="18" fill="#e7efff" stroke="none"/>
+<text x="1132" y="56" font-size="16" fill="#2563eb" font-weight="600" text-anchor="middle">持续分析流程</text>
+<path d="M 48 112 H 1232" fill="none" stroke="#d5dfec" stroke-width="1"/>
+<text x="48" y="153" font-size="17" fill="#52647b" font-weight="400" text-anchor="start">用户选范围 → 采集 worker 取数、检查并调度 → 控制库排队</text>
+<rect x="48" y="190" width="266" height="152" rx="16" fill="white" stroke="#d5dfec"/>
+<text x="68" y="221" font-size="16" fill="#2563eb" font-weight="700" text-anchor="start">01</text>
+<text x="68" y="256" font-size="20" fill="#14263f" font-weight="700" text-anchor="start">选择主机与监控项</text>
+<text x="68" y="292" font-size="16" fill="#52647b" font-weight="400" text-anchor="start">同一业务 · 同一 Zabbix 来源</text>
+<text x="68" y="318" font-size="16" fill="#52647b" font-weight="400" text-anchor="start">组合为联合分析对象</text>
+<rect x="354" y="190" width="266" height="152" rx="16" fill="white" stroke="#d5dfec"/>
+<text x="374" y="221" font-size="16" fill="#2563eb" font-weight="700" text-anchor="start">02</text>
+<text x="374" y="256" font-size="20" fill="#14263f" font-weight="700" text-anchor="start">后台定时取数</text>
+<text x="374" y="292" font-size="16" fill="#52647b" font-weight="400" text-anchor="start">读取所选数据</text>
+<text x="374" y="318" font-size="16" fill="#52647b" font-weight="400" text-anchor="start">保留时间、单位与缺口</text>
+<rect x="660" y="190" width="266" height="152" rx="16" fill="white" stroke="#d5dfec"/>
+<text x="680" y="221" font-size="16" fill="#2563eb" font-weight="700" text-anchor="start">03</text>
+<text x="680" y="256" font-size="20" fill="#14263f" font-weight="700" text-anchor="start">信号或周期检查</text>
+<text x="680" y="292" font-size="16" fill="#52647b" font-weight="400" text-anchor="start">新异常 / 定期综合检查</text>
+<text x="680" y="318" font-size="16" fill="#52647b" font-weight="400" text-anchor="start">遵守权限与预算</text>
+<rect x="966" y="190" width="266" height="152" rx="16" fill="white" stroke="#d5dfec"/>
+<text x="986" y="221" font-size="16" fill="#2563eb" font-weight="700" text-anchor="start">04</text>
+<text x="986" y="256" font-size="20" fill="#14263f" font-weight="700" text-anchor="start">调查任务入队</text>
+<text x="986" y="292" font-size="16" fill="#52647b" font-weight="400" text-anchor="start">去重并记录状态</text>
+<text x="986" y="318" font-size="16" fill="#52647b" font-weight="400" text-anchor="start">保存到控制 MySQL</text>
+<rect x="966" y="470" width="266" height="152" rx="16" fill="white" stroke="#d5dfec"/>
+<text x="986" y="501" font-size="16" fill="#0f766e" font-weight="700" text-anchor="start">05</text>
+<text x="986" y="536" font-size="20" fill="#14263f" font-weight="700" text-anchor="start">冻结分析窗口</text>
+<text x="986" y="572" font-size="16" fill="#52647b" font-weight="400" text-anchor="start">AI worker 领取调查</text>
+<text x="986" y="598" font-size="16" fill="#52647b" font-weight="400" text-anchor="start">保存当次证据与覆盖情况</text>
+<rect x="660" y="470" width="266" height="152" rx="16" fill="white" stroke="#d5dfec"/>
+<text x="680" y="501" font-size="16" fill="#0f766e" font-weight="700" text-anchor="start">06</text>
+<text x="680" y="536" font-size="20" fill="#14263f" font-weight="700" text-anchor="start">规则 / 可选 AI</text>
+<text x="680" y="572" font-size="16" fill="#52647b" font-weight="400" text-anchor="start">受限只读工具与脱敏摘要</text>
+<text x="680" y="598" font-size="16" fill="#52647b" font-weight="400" text-anchor="start">关联线索并生成解释</text>
+<rect x="354" y="470" width="266" height="152" rx="16" fill="white" stroke="#d5dfec"/>
+<text x="374" y="501" font-size="16" fill="#0f766e" font-weight="700" text-anchor="start">07</text>
+<text x="374" y="536" font-size="20" fill="#14263f" font-weight="700" text-anchor="start">结论与依据</text>
+<text x="374" y="572" font-size="16" fill="#52647b" font-weight="400" text-anchor="start">现象 · 原因 · 建议</text>
+<text x="374" y="598" font-size="16" fill="#52647b" font-weight="400" text-anchor="start">图表、关系与证据引用</text>
+<rect x="48" y="470" width="266" height="152" rx="16" fill="white" stroke="#d5dfec"/>
+<text x="68" y="501" font-size="16" fill="#0f766e" font-weight="700" text-anchor="start">08</text>
+<text x="68" y="536" font-size="20" fill="#14263f" font-weight="700" text-anchor="start">人工核对与复验</text>
+<text x="68" y="572" font-size="16" fill="#52647b" font-weight="400" text-anchor="start">人员决定并实施处理</text>
+<text x="68" y="598" font-size="16" fill="#52647b" font-weight="400" text-anchor="start">再看后续真实采样</text>
+<path d="M 319 266 H 344" fill="none" stroke="#2563eb" stroke-width="2.3" marker-end="url(#blue)"/>
+<path d="M 625 266 H 650" fill="none" stroke="#2563eb" stroke-width="2.3" marker-end="url(#blue)"/>
+<path d="M 931 266 H 956" fill="none" stroke="#2563eb" stroke-width="2.3" marker-end="url(#blue)"/>
+<path d="M 1099 352 V 460" fill="none" stroke="#0f766e" stroke-width="2.3" marker-end="url(#teal)"/>
+<rect x="1022.0" y="394" width="154" height="25" rx="5" fill="#f5f8fc" stroke="none"/>
+<text x="1099" y="412" font-size="16" fill="#0f766e" font-weight="400" text-anchor="middle">AI worker 领取</text>
+<path d="M 961 546 H 936" fill="none" stroke="#0f766e" stroke-width="2.3" marker-end="url(#teal)"/>
+<path d="M 655 546 H 630" fill="none" stroke="#0f766e" stroke-width="2.3" marker-end="url(#teal)"/>
+<path d="M 349 546 H 324" fill="none" stroke="#0f766e" stroke-width="2.3" marker-end="url(#teal)"/>
+<text x="48" y="673" font-size="18" fill="#14263f" font-weight="600" text-anchor="start">不能确定或不能完成时，明确显示原因：</text>
+<rect x="48" y="694" width="372" height="82" rx="13" fill="#fff7ea" stroke="#e8d5b7"/>
+<text x="68" y="724" font-size="18" fill="#a45b13" font-weight="700" text-anchor="start">缺数 / 过期</text>
+<text x="68" y="754" font-size="16" fill="#52647b" font-weight="400" text-anchor="start">标记未知，不补零或假定正常</text>
+<rect x="454" y="694" width="372" height="82" rx="13" fill="#fff7ea" stroke="#e8d5b7"/>
+<text x="474" y="724" font-size="18" fill="#a45b13" font-weight="700" text-anchor="start">预算 / 权限不足</text>
+<text x="474" y="754" font-size="16" fill="#52647b" font-weight="400" text-anchor="start">显示阻断原因，不偷偷扩大范围</text>
+<rect x="860" y="694" width="372" height="82" rx="13" fill="#fff7ea" stroke="#e8d5b7"/>
+<text x="880" y="724" font-size="18" fill="#a45b13" font-weight="700" text-anchor="start">模型 / 引用校验失败</text>
+<text x="880" y="754" font-size="16" fill="#52647b" font-weight="400" text-anchor="start">保留失败，不拼造替代结论</text>
+<text x="48" y="820" font-size="16" fill="#52647b" font-weight="400" text-anchor="start">复验依据后续真实采样；旧报告保持原分析窗口。自动化负责检查，数据库操作由人员控制。</text>
+</g>
+</svg>
