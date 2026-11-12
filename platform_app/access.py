@@ -41,6 +41,7 @@ CONTROL_ACTIONS = frozenset(
         "model_policy.manage",
         "audit.read",
         "platform.read",
+        "configuration.read",
     }
 )
 ACTION_REGISTRY = CONTROL_ACTIONS | frozenset(
@@ -101,6 +102,9 @@ ROLE_PERMISSIONS = {
         {"data.read", "event.read", "event.comment", "knowledge.read", "investigation.create"}
     ),
     "viewer": frozenset({"data.read", "event.read", "knowledge.read"}),
+    # A product tour may inspect safe configuration without any management action.
+    # Keep the showcase bridge identity on its separate minimal role.
+    "demo_viewer": frozenset({"data.read", "event.read", "knowledge.read", "configuration.read"}),
     "auditor": frozenset({"audit.read"}),
     "lab_operator": frozenset({"lab.operate"}),
 }

@@ -49,6 +49,7 @@ export interface Issue {
   finding_status?: 'observed' | 'hypothesis' | 'conditional_prediction';
   issue_category?: IssueCategory;
   report_freshness?: ReportFreshness;
+  observation_state?: string;
 }
 export type GraphKind = 'observed' | 'registered' | 'hypothesis' | 'conditional_prediction';
 export interface EvidenceNode {
@@ -378,7 +379,13 @@ export function frozenMetricPath(investigationId: string | null, reference: stri
     ? `/investigations/${investigationId}/metric-windows/${item}`
     : null;
 }
-export function findingLabel(issue: Pick<Issue, 'kind' | 'finding_status'>): string {
+export function isHistoricalObservation(issue: Pick<Issue, 'observation_state'>): boolean {
+  return ['returned_to_baseline','recovered','configuration_changed'].includes(issue.observation_state ?? '');
+}
+export function findingLabel(issue: Pick<Issue, 'kind' | 'finding_status' | 'observation_state'>): string {
+  if (issue.observation_state === 'returned_to_baseline') return '指标已回基线';
+  if (issue.observation_state === 'configuration_changed') return '配置已变化 · 历史观测';
+  if (issue.observation_state === 'recovered') return '后续观测已恢复';
   if (issue.finding_status === 'hypothesis') return '候选解释 · 待核验';
   if (issue.finding_status === 'conditional_prediction') return '条件预测';
   return issue.kind === 'current' ? '当前问题' : '潜在风险';

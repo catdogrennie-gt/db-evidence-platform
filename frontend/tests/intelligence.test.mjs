@@ -268,6 +268,16 @@ test('an AI correlation hypothesis is never labelled as a measured trend forecas
   assert.equal(findingLabel({ kind: 'current', finding_status: 'observed' }), '当前问题');
 });
 
+test('returned or superseded observations are labelled as history instead of ongoing issues', () => {
+  const recovered = {kind:'current',finding_status:'observed',observation_state:'returned_to_baseline'};
+  const changed = {...recovered,observation_state:'configuration_changed'};
+  assert.equal(findingLabel(recovered), '指标已回基线');
+  assert.equal(findingLabel(changed), '配置已变化 · 历史观测');
+  assert.equal(intelligenceModel.isHistoricalObservation(recovered), true);
+  assert.equal(intelligenceModel.isHistoricalObservation(changed), true);
+  assert.equal(intelligenceModel.isHistoricalObservation({...recovered,observation_state:'active'}), false);
+});
+
 test('pending and failed analyses cannot render as a completed diagnosis', () => {
   assert.equal(
     reportState({ report: null, status: 'analyzing', investigation_id: 'a' }),

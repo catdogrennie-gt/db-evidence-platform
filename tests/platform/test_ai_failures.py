@@ -146,7 +146,7 @@ def test_live_report_is_persisted_with_real_call_audit_and_projected_input(ai_en
     assert result.status == "completed" and result.conclusion_type == "live_model"
     assert len(captured) == 1
     assert result.report["executive_summary"]["joint_root_cause"]["status"] == "insufficient_evidence"
-    assert result.report["prompt_version"] == "evidence-investigation-v3.5"
+    assert result.report["prompt_version"] == "evidence-investigation-v3.7"
     assert all(
         s not in captured[0]
         for s in (
@@ -357,7 +357,8 @@ def test_empty_external_source_allowlist_denies_and_system_instance_lists_inters
     assert preview["evidence"] == []  # The fixture's runtime evidence is excluded.
 
 
-def test_tool_context_pressure_finalizes_without_raising_hard_token_cap(ai_env, monkeypatch):
+@pytest.mark.parametrize('argument_padding,can_finalize', [(800, True), (1100, False)])
+def test_tool_context_pressure_finalizes_without_raising_hard_token_cap(ai_env, monkeypatch,argument_padding,can_finalize):
     import json
     from platform_app.investigations import run_investigation
     from platform_app.tools import ToolBroker
@@ -381,7 +382,7 @@ def test_tool_context_pressure_finalizes_without_raising_hard_token_cap(ai_env, 
     calls = []
 
     def provider(config, payload, timeout):
-        calls.append(payload)
+        calls.append(json.loads(json.dumps(payload)))
         if len(calls) == 1:
             return {
                 "choices": [
@@ -393,7 +394,7 @@ def test_tool_context_pressure_finalizes_without_raising_hard_token_cap(ai_env, 
                                     "type": "function",
                                     "function": {
                                         "name": "get_lock_graph",
-                                        "arguments": json.dumps({"instance_id": ai_env["a"].id, "fixture_pressure": "x" * 930}),
+                                        "arguments": json.dumps({"instance_id": ai_env["a"].id, "fixture_pressure": "x" * argument_padding}),
                                     },
                                 }
                                 for i in range(6)
@@ -411,10 +412,17 @@ def test_tool_context_pressure_finalizes_without_raising_hard_token_cap(ai_env, 
         return provider_response(ai_env["evidence"].id)
 
     result = run_investigation(ai_env["factory"], lease, config, model_client=provider)
-    assert result.status == "completed" and len(calls) == 2, (result.report, [(c["tool_choice"], len(json.dumps(c,ensure_ascii=False,separators=(",",":")).encode())+512) for c in calls])
+    # The complete last tool group is retained. If that group plus the safety
+    # contract cannot fit, fail closed instead of raising the hard ceiling or
+    # pretending a tool was never called. Padding is synthetic provider output.
+    if can_finalize:
+        assert result.status == "completed" and len(calls) == 2, result.report
+    else:
+        assert result.status=='failed' and result.report['error_code']=='model_token_budget_exhausted'
+        assert len(calls)==1
 
 
-@pytest.mark.parametrize('configured,expected', [(1000,1000),(2000,2000),(3000,3000),(5000,3000),(None,3000)])
+@pytest.mark.parametrize('configured,expected', [(1000,1000),(2000,2000),(3000,3000),(5000,4096),(None,3000)])
 def test_deepseek_final_json_budget_disables_default_thinking(ai_env,configured,expected):
     from platform_app.investigations import run_investigation
 

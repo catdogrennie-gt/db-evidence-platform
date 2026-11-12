@@ -169,12 +169,18 @@ export function LoadState({
   retry,
   children,
   empty = false,
+  refreshing,
+  updatedAt,
+  refreshError,
 }: {
   loading?: boolean;
   error?: Error;
   retry?: () => void;
   children?: ReactNode;
   empty?: boolean;
+  refreshing?: boolean;
+  updatedAt?: string;
+  refreshError?: Error;
 }) {
   if (loading)
     return (
@@ -201,8 +207,23 @@ export function LoadState({
         }
       />
     );
-  if (empty) return <Empty description="当前范围内暂无资料" />;
-  return <>{children}</>;
+  return <>
+    <ResourceRefreshStatus refreshing={refreshing} updatedAt={updatedAt} refreshError={refreshError} />
+    {empty ? <Empty description="当前范围内暂无资料" /> : children}
+  </>;
+}
+export function ResourceRefreshStatus({ refreshing, updatedAt, refreshError }: {
+  refreshing?: boolean; updatedAt?: string; refreshError?: Error;
+}) {
+  if (!updatedAt && !refreshing && !refreshError) return null;
+  return <div role="status" aria-live="polite" style={{ marginBottom: 12 }}>
+    <Typography.Text type={refreshError ? 'warning' : 'secondary'}>
+      {refreshError ? '刷新未完成，显示上次成功读取的内容。' : refreshing ? '刷新中，正在显示上次成功读取的内容。' : '上次成功读取：'}
+      {(refreshError || refreshing) && updatedAt ? ' 上次成功读取：' : ''}
+      <Time value={updatedAt} />
+      {refreshError && <span> · {errorMessage(refreshError)}</span>}
+    </Typography.Text>
+  </div>;
 }
 export function ErrorNotice({ error }: { error: unknown }) {
   return error ? (
@@ -514,6 +535,34 @@ export function RecordBlock({ data, depth = 0 }: { data: unknown; depth?: number
     </dl>
   );
 }
+function optionRows(value: unknown): Row[] {
+  return (Array.isArray(value) ? value : value && typeof value === 'object' ? [value] : []) as Row[];
+}
+function previousComponent(rows: Row[], next: Row, index: number): Row | undefined {
+  if (next.id !== undefined) return rows.find(row => row.id === next.id);
+  if (next.name !== undefined) return rows.find(row => row.name === next.name);
+  return rows[index];
+}
+// setOption merges data into the mounted instance. Preserve the reader's interaction
+// state explicitly because incoming options often contain default zoom/legend values.
+export function applyChartUpdate(chart: Pick<ReturnType<typeof echarts.init>, 'getOption' | 'setOption'>, option: EChartsOption) {
+  const current = chart.getOption() ?? {};
+  const next = { ...option };
+  if (option.dataZoom) next.dataZoom = optionRows(option.dataZoom).map((zoom, index) => {
+    const previous = previousComponent(optionRows(current.dataZoom), zoom, index);
+    return { ...zoom, ...(typeof previous?.start === 'number' ? { start: previous.start } : {}), ...(typeof previous?.end === 'number' ? { end: previous.end } : {}) };
+  }) as EChartsOption['dataZoom'];
+  if (option.legend) next.legend = optionRows(option.legend).map((legend, index) => {
+    const previous = previousComponent(optionRows(current.legend), legend, index);
+    return { ...legend, ...(previous?.selected ? { selected: { ...(legend.selected as Row ?? {}), ...(previous.selected as Row) } } : {}) };
+  }) as EChartsOption['legend'];
+  if (option.series) next.series = optionRows(option.series).map((series, index) => {
+    if (series.type !== 'graph') return series;
+    const previous = previousComponent(optionRows(current.series), series, index);
+    return previous?.type === 'graph' ? { ...series, ...(typeof previous.zoom === 'number' ? { zoom: previous.zoom } : {}), ...(Array.isArray(previous.center) ? { center: previous.center } : {}) } : series;
+  }) as EChartsOption['series'];
+  chart.setOption(next, { replaceMerge: ['series', 'dataZoom', 'legend'] });
+}
 export function Chart({
   option,
   height = 300,
@@ -526,18 +575,25 @@ export function Chart({
   label?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const instance = useRef<ReturnType<typeof echarts.init> | null>(null);
+  const click = useRef(onClick);
+  click.current = onClick;
   useEffect(() => {
     if (!ref.current) return;
     const chart = echarts.init(ref.current);
-    chart.setOption(option);
-    if (onClick) chart.on('click', (p) => onClick(p as unknown as Row));
+    instance.current = chart;
+    chart.on('click', (p) => click.current?.(p as unknown as Row));
     const observer = new ResizeObserver(() => chart.resize());
     observer.observe(ref.current);
     return () => {
       observer.disconnect();
+      instance.current = null;
       chart.dispose();
     };
-  }, [option, onClick]);
+  }, []);
+  useEffect(() => {
+    if (instance.current) applyChartUpdate(instance.current, option);
+  }, [option]);
   return <div ref={ref} style={{ height, width: '100%' }} role="img" aria-label={label} />;
 }
 export function RelationshipGraph({ nodes, edges }: { nodes: Row[]; edges: Row[] }) {

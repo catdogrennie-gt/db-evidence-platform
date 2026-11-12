@@ -40,7 +40,7 @@ export function Monitoring() {
   const { scope, refresh } = useScope();
   const can = useCan();
   const sources = useResource<{ items: MonitoringSource[]; total: number }>(
-    can('asset.onboard') ? '/monitoring/sources' : null,
+    can('asset.onboard') ? '/monitoring/sources' : can('configuration.read') ? `/readonly/sources?${query({ system_id: scope.system_id })}` : null,
     refresh,
   );
   const [editing, setEditing] = useState<MonitoringSource | 'new'>();
@@ -70,6 +70,11 @@ export function Monitoring() {
         }
       />
       <AnalysisGroups sources={visibleSources} sourcesLoading={sources.loading} version={refresh} changed={sources.reload} />
+      {!can('asset.onboard') && can('configuration.read') && <Card className="intel-source-card" title="Zabbix 监控来源 · 只读">
+        <LoadState {...sources} retry={sources.reload}>
+          {sources.data && <ReadonlySourceList sources={sources.data.items} />}
+        </LoadState>
+      </Card>}
       {can('asset.onboard') && (
         <Card
           className="intel-source-card"
@@ -130,6 +135,16 @@ export function Monitoring() {
       )}
     </div>
   );
+}
+
+export function ReadonlySourceList({ sources }: { sources: { id: string; name: string; status: string; last_success_at?: string | null; group_count?: number; host_count?: number; item_count?: number }[] }) {
+  return <>
+    <p className="intel-muted">可查看演示业务范围的来源状态和已选数据，凭据与内部连接地址不公开。数据组成可在上方“查看数据”中核对。</p>
+    {sources.length ? <div className="intel-source-list">{sources.map(source => <div key={text(source.id)} className="intel-source-row">
+      <div><strong>{text(source.name)}</strong><div className="intel-muted">{text(source.group_count)} 个联合对象 · {text(source.host_count)} 个主机 · {text(source.item_count)} 个已选监控项</div></div>
+      <Space><MonitoringStatus status={text(source.status)} source /><span>最近成功 <Time value={source.last_success_at} /></span></Space>
+    </div>)}</div> : <Empty description="当前授权范围还没有关联的 Zabbix 来源" />}
+  </>;
 }
 
 function SourceForm({

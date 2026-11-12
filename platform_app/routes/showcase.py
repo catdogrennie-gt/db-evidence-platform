@@ -24,6 +24,23 @@ def read_snapshot(request:Request,db=Depends(get_db)):
     return showcase.snapshot(db,request.app.state.config)
 
 
+@router.get('/targets',dependencies=[Depends(capability)])
+def targets(request:Request,db=Depends(get_db)):
+    return showcase.target_catalog(db,request.app.state.config)
+
+
+@router.get('/targets/{key}/snapshot',dependencies=[Depends(capability)])
+def target_snapshot(key:str,request:Request,db=Depends(get_db)):
+    return showcase.snapshot(db,showcase.select_target(request.app.state.config,key))
+
+
+@router.put('/targets/{key}/pacing',dependencies=[Depends(capability)])
+def target_pacing(key:str,request:Request,body:PacingInput,db=Depends(get_db)):
+    value=showcase.set_pacing(db,showcase.select_target(request.app.state.config,key),body.enabled)
+    db.commit()
+    return {'server_time':iso(db_now(db)),'pacing':value}
+
+
 @router.put('/pacing',dependencies=[Depends(capability)])
 def pacing(request:Request,body:PacingInput,db=Depends(get_db)):
     value=showcase.set_pacing(db,request.app.state.config,body.enabled)

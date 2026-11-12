@@ -2,12 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Card, Space, Switch, Tag } from 'antd';
 import { api, ApiError } from './api';
 import type { Row } from './api';
-import { useCan } from './hooks';
+import { RESOURCE_REFRESH_MS, useCan, useResource, useScope } from './hooks';
 import { HistoricalInvestigationReport } from './Historical';
 import { FrozenMetricDrawer, MetricPanel } from './Intelligence';
 import { chartData, frozenMetricPath } from './intelligenceModel';
 import type { MetricChartData } from './intelligenceModel';
-import { LoadState, Time, Title } from './ui';
+import { LoadState, ResourceRefreshStatus, Time, Title } from './ui';
 
 export interface DemoRun {
   id: string; status: string; phase: string; fault_state: string;
@@ -44,8 +44,8 @@ const errorLabels: Record<string, string> = {
 };
 const errorLabel = (code: string) => `${errorLabels[code] ?? '本轮未完成，请核对实验与采集状态'}（${code}）`;
 const secondsUntil = (date: string | null | undefined, now: number) => date && Number.isFinite(now) && Number.isFinite(Date.parse(date)) ? Math.max(0, Math.ceil((Date.parse(date) - now) / 1000)) : null;
-export function DemoView({ data, error, actionError, receivedAt, elapsedSeconds = 0, busy = false, onToggle, onRefresh }: {
-  data?: DemoSnapshot; error?: unknown; actionError?: unknown; receivedAt?: string; elapsedSeconds?: number; busy?: boolean;
+export function DemoView({ data, error, actionError, receivedAt, refreshing, elapsedSeconds = 0, busy = false, onToggle, onRefresh }: {
+  data?: DemoSnapshot; error?: unknown; actionError?: unknown; receivedAt?: string; refreshing?: boolean; elapsedSeconds?: number; busy?: boolean;
   onToggle?: (start: boolean) => void; onRefresh?: () => void;
 }) {
   const [reference, setReference] = useState<string>();
@@ -63,6 +63,7 @@ export function DemoView({ data, error, actionError, receivedAt, elapsedSeconds 
   const currentReport = !!data?.report && !!run?.investigation_id && String(data.report.id) === run.investigation_id;
   return <div className="intel-page demo-page">
     <Title title="真实锁等待演示" description="真实隔离实验 · 合成业务负载 · 实际 Zabbix 观测" />
+    <ResourceRefreshStatus updatedAt={receivedAt} refreshing={refreshing} />
     <Alert type="info" showIcon title="全站共享同一轮实验" description="所有访客看到同一个固定 Lab；有控制权限的访客均可停止当前轮次。实验仅制造专用测试行的事务等待，服务端到期自动回滚。模型解释只使用授权的冻结证据。" />
     {!!error && <Alert type="warning" showIcon title={data ? '状态已过期：保留上次快照' : '暂时无法读取演示状态'} description={<><p>{error instanceof ApiError ? errorLabel(error.code) : '连接失败，请刷新重试。'}</p><p>上次成功读取：{receivedAt ?? '尚无成功快照'}；倒计时不代表解除已获确认。</p></>} action={<Button onClick={onRefresh}>重试</Button>} />}
     {!!actionError && <Alert type="error" showIcon title="操作未成功" description={actionError instanceof ApiError ? errorLabel(actionError.code) : '请求未完成，请核对当前状态后重试。'} />}
@@ -106,33 +107,28 @@ export function DemoView({ data, error, actionError, receivedAt, elapsedSeconds 
 export function Demo() {
   const can = useCan();
   const allowed = can('data.read');
-  const [data, setData] = useState<DemoSnapshot>();
-  const [error, setError] = useState<unknown>();
   const [actionError, setActionError] = useState<unknown>();
-  const [receivedAt, setReceivedAt] = useState<string>();
   const [elapsedSeconds, setElapsed] = useState(0);
   const [busy, setBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const { refresh: pageRefresh } = useScope();
+  const resource = useResource<DemoSnapshot>(allowed ? '/demo' : null, refresh + pageRefresh);
+  const data = resource.data;
+  const error = resource.error ?? resource.refreshError;
+  const receivedAt = resource.updatedAt;
   const anchor = useRef(0);
   const mounted = useRef(false);
   useEffect(() => {
     if (!allowed) return;
     mounted.current = true;
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const controller = new AbortController();
-    async function poll() {
-      try {
-        const value = await api.get<DemoSnapshot>('/demo', controller.signal);
-        if (stopped) return;
-        setData(value); setError(undefined); setReceivedAt(new Date().toISOString()); anchor.current = Date.now(); setElapsed(0);
-      } catch (e) { if (!stopped) setError(e); }
-      finally { if (!stopped) timer = setTimeout(poll, 3000); }
-    }
-    void poll();
+    const timer = setInterval(() => setRefresh(value => value + 1), RESOURCE_REFRESH_MS);
     const clock = setInterval(() => setElapsed(anchor.current ? Math.max(0, (Date.now() - anchor.current) / 1000) : 0), 1000);
-    return () => { stopped = true; mounted.current = false; controller.abort(); clearTimeout(timer); clearInterval(clock); };
-  }, [allowed, refresh]);
+    return () => { mounted.current = false; clearInterval(timer); clearInterval(clock); };
+  }, [allowed]);
+  useEffect(() => {
+    anchor.current = receivedAt ? Date.parse(receivedAt) : 0;
+    setElapsed(0);
+  }, [receivedAt]);
   async function toggle(start: boolean) {
     setBusy(true); setActionError(undefined);
     try { await api.post(start ? '/demo/start' : '/demo/stop', start ? {} : { run_id: data?.run?.id }); if (mounted.current) setRefresh(v => v + 1); }
@@ -140,7 +136,7 @@ export function Demo() {
     finally { if (mounted.current) setBusy(false); }
   }
   if (!allowed) return <Alert type="warning" title="无演示读取权限" />;
-  return <DemoView data={data} error={error} actionError={actionError} receivedAt={receivedAt} elapsedSeconds={elapsedSeconds} busy={busy} onToggle={toggle} onRefresh={() => setRefresh(v => v + 1)} />;
+  return <DemoView data={data} error={error} actionError={actionError} receivedAt={receivedAt} refreshing={resource.refreshing} elapsedSeconds={elapsedSeconds} busy={busy} onToggle={toggle} onRefresh={resource.reload} />;
 }
 
 
@@ -180,7 +176,7 @@ export function DemoFrozenCharts({ charts, historical, loading = false, errors =
 }
 function DemoReportCurves({ report, historical }: { report: Row; historical: boolean }) {
   const [state, setState] = useState<{ charts: MetricChartData[]; errors: number; loading: boolean }>({ charts: [], errors: 0, loading: false });
-  // The parent key contains ID + completion status. Three-second snapshots retain this mount.
+  // The parent key contains ID + completion status. State refreshes retain this mount.
   useEffect(() => {
     if (!['completed', 'succeeded'].includes(String(report.status))) return;
     const controller = new AbortController();

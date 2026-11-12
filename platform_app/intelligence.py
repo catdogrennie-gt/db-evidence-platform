@@ -18,7 +18,7 @@ from .monitoring import mapping_for
 from .scheduling import db_now, task_ref
 
 POLICY_FIELDS = ['id','version','enabled','instance_ids','signal_interval_seconds','ai_interval_seconds','urgent_enabled','cooldown_seconds','max_daily_runs','mode','external_confirmed','next_signal_at','next_ai_at','last_dispatched_at','last_completed_at','status','reason']
-LABELS = {'lock_wait': '存在数据库锁等待', 'sql_latency': 'SQL 窗口平均耗时偏高', 'cpu_pressure': '主机 CPU 持续压力', 'probe_unavailable': '数据库探测不可用', 'cpu_trend': 'CPU 增长趋势的条件性容量风险', 'evidence_correlation': '待核验：AI 证据关联假设'}
+LABELS = {'lock_wait': '存在数据库锁等待', 'sql_latency': 'SQL 窗口平均耗时偏高', 'cpu_pressure': '主机 CPU 持续压力', 'probe_unavailable': '数据库探测不可用', 'cpu_trend': 'CPU 增长趋势的条件性容量风险', 'baseline_change': '监控项出现持续基线变化，待关联分析', 'evidence_correlation': '待核验：AI 证据关联假设'}
 RULE_CATEGORY = {'locks_present': 'lock_wait', 'sql_latency': 'sql_latency'}
 TERMINAL_EVENTS = ('resolved','closed','merged')
 
@@ -202,6 +202,8 @@ def scan_signals(db, policy, now):
                 if not risk: continue
                 evidence=db.scalar(select(m.Evidence).where(m.Evidence.instance_id==identifier,m.Evidence.source=="linux.host",m.Evidence.observed_at>=now-timedelta(minutes=5)).order_by(m.Evidence.observed_at.desc()).limit(1))
                 if evidence: findings.append(upsert_finding(db,identifier,"cpu_trend","instance",[evidence.id],risk,kind="risk",now=now))
+    from .health_signals import scan_group_changes
+    findings.extend(scan_group_changes(db,policy,now))
     return list({f.id:f for f in findings}.values())
 
 
@@ -265,7 +267,8 @@ def sync_model_findings(db, dispatch, investigation):
         if observed:
             link_report(db,observed,investigation)
             continue
-        dimension='sql:'+proposal.dimension.value.lower() if proposal.category=='sql' else proposal.category+':instance'
+        dimension=('metric:'+proposal.dimension.value if proposal.dimension.kind=='metric' else
+                   'sql:'+proposal.dimension.value.lower() if proposal.category=='sql' else proposal.category+':instance')
         existing=db.scalar(select(m.InspectionFinding).where(m.InspectionFinding.fingerprint==digest([identifier,'evidence_correlation',dimension])).with_for_update())
         previous=db.get(m.Investigation,existing.latest_investigation_id) if existing and existing.latest_investigation_id else None
         rank=lambda inv:(inv.window_end,inv.event_id==existing.event_id,inv.created_at,inv.id)
@@ -283,6 +286,10 @@ def _matching_observed_finding(db,proposal):
     candidates=db.scalars(select(m.InspectionFinding).join(m.Event,m.Event.id==m.InspectionFinding.event_id).where(m.InspectionFinding.instance_id==proposal.instance_id,m.InspectionFinding.category!='evidence_correlation',m.Event.status.notin_(TERMINAL_EVENTS)).order_by(m.InspectionFinding.updated_at.desc()).with_for_update())
     expected=proposal.dimension.value.lower() if proposal.dimension.kind=='sql_digest' else 'instance'
     for finding in candidates:
+        if proposal.dimension.kind=='metric':
+            if finding.category=='baseline_change' and str((finding.calculation or {}).get('itemid'))==proposal.dimension.value:
+                return finding
+            continue
         if _issue_category(finding)!=proposal.category: continue
         dimension=finding.dimension.lower()
         if proposal.dimension.kind=='sql_digest' and dimension.startswith('sql:'): dimension=dimension[4:]
@@ -294,6 +301,41 @@ def finding_dimension_supported(db, proposal, items):
     """Validate identity against cited frozen facts, without a threshold gate."""
     from .tools import project_evidence, project_metric_window
     for item in items:
+        if proposal.dimension.kind=='metric':
+            manifest=db.get(m.EvidenceManifest,item.manifest_id)
+            if (not manifest or item.instance_id!=proposal.instance_id
+                    or item.instance_id not in manifest.instance_ids): continue
+            if item.evidence_id:
+                evidence=db.get(m.Evidence,item.evidence_id)
+                if (not evidence or evidence.instance_id!=item.instance_id
+                        or evidence.payload_sha256!=item.payload_sha256
+                        or not manifest.window_start<=evidence.observed_at<manifest.window_end
+                        or not evidence.source.startswith('zabbix.item.numeric:')): continue
+                try: projected=project_evidence(evidence)
+                except (HTTPException,TypeError,ValueError,KeyError,AttributeError): continue
+                data=projected['data']; meta=data.get('item') or {}
+                if (projected['coverage'].get('availability')!='available'
+                        or meta.get('value_kind')!='numeric'
+                        or str(meta.get('itemid'))!=proposal.dimension.value): continue
+                invalid_times=set()
+                for row in (evidence.payload or {}).get('rows',[]):
+                    if not isinstance(row,dict) or row.get('validity','valid')=='valid': continue
+                    try: invalid_times.add(parse_time(row.get('time')))
+                    except (HTTPException,TypeError,ValueError,AttributeError): continue
+                for row in data.get('rows',[]):
+                    try: stamp=parse_time(row['time'])
+                    except (KeyError,TypeError,ValueError,HTTPException): continue
+                    if (manifest.window_start<=stamp<manifest.window_end
+                            and stamp not in invalid_times
+                            and isinstance(row.get('value'),(int,float)) and not isinstance(row.get('value'),bool)
+                            and math.isfinite(row['value'])): return True
+            elif item.item_type=='time_series_window':
+                projected=project_metric_window(item,manifest.window_start,manifest.window_end)
+                if (projected and projected['template']=='zabbix_item_numeric'
+                        and str((projected.get('item') or {}).get('itemid'))==proposal.dimension.value
+                        and any(p['value'] is not None for p in projected['points'])):
+                    return True
+            continue
         if item.evidence_id:
             evidence=db.get(m.Evidence,item.evidence_id)
             if not evidence or evidence.instance_id!=item.instance_id or evidence.payload_sha256!=item.payload_sha256: continue
@@ -395,7 +437,7 @@ def dispatch_due(factory, *, policy_id=None, force=False):
                 # Nested transaction preserves a visible blocked state on queue limits.
                 try:
                     with db.begin_nested():
-                        inv, task = create_investigation(actor,identifiers,now-timedelta(hours=1),now,'自动综合巡检：关联数据库、主机和网络证据；比较异常与基线，列出反证和未知，不能把相关性当成已证实根因。',mode=policy.mode,event_id=event_id,idempotency_key=key,options={'external_confirmed':policy.external_confirmed,'max_tool_calls':6,'inspection':{'policy_id':policy.id,'version':policy.version,'signals':[{'category':f.category,'kind':f.kind,'instance_id':f.instance_id,'evidence_ids':f.evidence_ids,'calculation':f.calculation} for f in findings if f.instance_id in identifiers]}})
+                        inv, task = create_investigation(actor,identifiers,now-timedelta(hours=1),now,'自动综合巡检：关联应用、数据库、主机和网络的实际证据；先说明发生什么、影响和建议操作，再比较异常与基线，列出反证和未知。区分应用侧与数据库侧原因，不能把相关性当成已证实根因。',mode=policy.mode,event_id=event_id,idempotency_key=key,options={'external_confirmed':policy.external_confirmed,'max_tool_calls':6,'inspection':{'policy_id':policy.id,'version':policy.version,'signals':[{'category':f.category,'kind':f.kind,'instance_id':f.instance_id,'evidence_ids':f.evidence_ids,'calculation':f.calculation} for f in findings if f.instance_id in identifiers]}})
                         db.add(m.InspectionDispatch(policy_id=policy.id,policy_version=policy.version,dispatch_key=key,trigger=trigger,event_id=event_id,instance_ids=identifiers,investigation_id=inv.id,task_id=task.id))
                         for f in findings:
                             if f.instance_id in identifiers:
@@ -426,7 +468,7 @@ def _issue_category(finding):
     if finding.category=='evidence_correlation':
         family=(finding.calculation or {}).get('family')
         return family if family in ('locks','sql','host','network','correlation') else 'correlation'
-    return {'lock_wait':'locks','sql_latency':'sql','cpu_pressure':'host','cpu_trend':'host','probe_unavailable':'network'}.get(finding.category,'unknown')
+    return {'lock_wait':'locks','sql_latency':'sql','cpu_pressure':'host','cpu_trend':'host','probe_unavailable':'network','baseline_change':'correlation'}.get(finding.category,'unknown')
 
 
 def _evidence_category(source):
@@ -439,8 +481,28 @@ def _evidence_category(source):
 def _related_report_fact(db,inv,finding):
     if not finding or not inv.manifest_id: return None
     relevant=set()
+    calculation=finding.calculation or {}
+    metric_identity=(str(calculation.get('source_id') or ''),str(calculation.get('hostid') or ''),str(calculation.get('itemid') or '')) if finding.category=='baseline_change' else None
     for item in db.scalars(select(m.ManifestItem).where(m.ManifestItem.manifest_id==inv.manifest_id,m.ManifestItem.instance_id==finding.instance_id)):
         payload=item.payload or {}
+        if metric_identity:
+            if not all(metric_identity): continue
+            if item.evidence_id:
+                evidence=db.get(m.Evidence,item.evidence_id)
+                if (not evidence or evidence.instance_id!=finding.instance_id
+                        or evidence.payload_sha256!=item.payload_sha256
+                        or not evidence.source.startswith('zabbix.item.numeric:')): continue
+                meta=(evidence.payload or {}).get('item') or {}; provenance=evidence.coverage or {}
+            elif item.item_type=='time_series_window' and payload.get('template')=='zabbix_item_numeric':
+                meta=payload.get('item') or {}; provenance=payload.get('provenance') or {}
+            else: continue
+            if (str(provenance.get('source_id') or ''),str(meta.get('hostid') or ''),str(meta.get('itemid') or ''))!=metric_identity: continue
+            if any(provenance.get(key) is not None and str(provenance[key])!=expected
+                   for key,expected in (('hostid',metric_identity[1]),('itemid',metric_identity[2]))): continue
+            proposal=FindingProposal(intent='review_issue',category='correlation',instance_id=finding.instance_id,
+                dimension={'kind':'metric','value':metric_identity[2]},statement='Metric fact reference',evidence_ids=['reference'])
+            if finding_dimension_supported(db,proposal,[item]): relevant.add(item.evidence_id or 'manifest:'+item.id)
+            continue
         if item.evidence_id and _evidence_category(payload.get('source'))==_issue_category(finding): relevant.add(item.evidence_id)
         elif item.item_type in ('prometheus_window','time_series_window'):
             key=payload.get('template','')
@@ -472,8 +534,8 @@ def _problem_observed_at(db,event,finding,inv):
     return max(observed) if observed else event.last_seen_at
 
 
-def _report_freshness(db,event,inv,finding):
-    observed=_problem_observed_at(db,event,finding,inv)
+def _report_freshness(db,event,inv,finding,*,observed_at=None):
+    observed=observed_at if observed_at is not None else _problem_observed_at(db,event,finding,inv)
     result={'status':'unavailable','reason':'尚无可用的问题分析报告','event_updated_at':iso(observed),'report_window_to':iso(inv.window_end) if inv else None}
     if inv and inv.status not in ('completed','partial','failed','cancelled'):
         result.update(status='pending',reason='问题分析尚未完成')
@@ -495,26 +557,159 @@ def issue_response(db,event,finding=None,actor=None):
     if inv and finding and finding.category=='evidence_correlation': summary=(finding.calculation or {}).get('statement') or summary
     freshness=_report_freshness(db,event,inv,finding)
     if freshness['status']=='outdated': summary=freshness['reason']
+    observation_state=(finding.calculation or {}).get('observation_state') if finding else None
+    if finding and finding.category=='baseline_change':
+        calc=finding.calculation or {}
+        mapping=mapping_for(db,instance.id)
+        if (not mapping or not mapping.selected or calc.get('config_revision')!=instance.config_revision
+                or calc.get('mapping_version')!=mapping.version or calc.get('source_id')!=mapping.source_id
+                or not any(str(i.get('hostid'))==str(calc.get('hostid')) and str(i.get('itemid'))==str(calc.get('itemid')) for i in mapping.items)):
+            observation_state='configuration_changed'
+    if observation_state=='configuration_changed':
+        summary='当前监控选择或配置已变化；此处保留历史观测，需要依据新配置的后续样本重新判断。'
+    elif finding and finding.category=='baseline_change' and observation_state=='returned_to_baseline':
+        summary='后续实际样本已回到该指标原基线；这不代表业务整体健康或根因已解决。'
+    elif not summary and finding and finding.category=='baseline_change':
+        calc=finding.calculation or {}
+        summary=(f"监控项 {calc.get('itemid','')} 的近期中位数 {calc.get('recent',{}).get('median')}，"
+                 f"基线中位数 {calc.get('baseline',{}).get('median')}；仅表示持续变化，业务影响与原因待分析。")
     if not summary: summary='报告未提供与该问题直接对应的事实，待定向核验' if inv and report else '分析尚未完成' if inv else '异常已登记，等待证据分析'
-    return {'id':event.id,'event_id':event.id,'title':event.title,'kind':finding.kind if finding else 'current','status':event.status,'severity':event.severity,'summary':(('待核验假设：' if finding and finding.category=='evidence_correlation' else '') + summary),'issue_category':_issue_category(finding),'report_freshness':freshness,'object_names':[instance.name],'instance_ids':[instance.id],'first_seen_at':iso(event.created_at),'updated_at':iso(event.last_seen_at),'investigation_id':inv.id if inv else None,'analysis_mode':(task.payload or {}).get('mode','rules_only') if task else 'rules_only','coverage_status':'complete' if report.get('coverage',{}).get('complete') else 'unknown' if not inv else 'partial','finding_status':'hypothesis' if finding and finding.category=='evidence_correlation' else 'conditional_prediction' if finding and finding.kind=='risk' else 'observed','report_status':inv.status if inv else 'not_started','report_error':task.error_code if task else None}
+    return {'id':event.id,'event_id':event.id,'title':event.title,'kind':finding.kind if finding else 'current','status':event.status,'severity':event.severity,'summary':(('待核验假设：' if finding and finding.category=='evidence_correlation' else '') + summary),'issue_category':_issue_category(finding),'report_freshness':freshness,'object_names':[instance.name],'instance_ids':[instance.id],'first_seen_at':iso(event.created_at),'updated_at':iso(event.last_seen_at),'investigation_id':inv.id if inv else None,'analysis_mode':(task.payload or {}).get('mode','rules_only') if task else 'rules_only','coverage_status':'complete' if report.get('coverage',{}).get('complete') else 'unknown' if not inv else 'partial','observation_state':observation_state,'finding_status':'hypothesis' if finding and finding.category=='evidence_correlation' else 'conditional_prediction' if finding and finding.kind=='risk' else 'observed','report_status':inv.status if inv else 'not_started','report_error':task.error_code if task else None}
+
+
+def _overview_reports(db, rows, allowed_data):
+    """Resolve whole-report authorization before selecting any report text.
+
+    A list needs the report's title/window/status, not its frozen manifest,
+    metric payloads, full task payload or per-finding detail validation.
+    """
+    from types import SimpleNamespace
+    chosen={event.id:finding.latest_investigation_id for event,finding in rows
+            if finding and finding.latest_investigation_id}
+    unlinked={event.id for event,_ in rows if event.id not in chosen}
+    if unlinked:
+        latest=select(m.Investigation.id,m.Investigation.event_id,
+            func.row_number().over(partition_by=m.Investigation.event_id,
+                order_by=(m.Investigation.created_at.desc(),m.Investigation.id.desc())).label('position')
+        ).where(m.Investigation.event_id.in_(unlinked)).subquery()
+        chosen.update((event_id,identifier) for identifier,event_id in db.execute(
+            select(latest.c.id,latest.c.event_id).where(latest.c.position==1)))
+    identifiers=set(chosen.values())
+    resources={identifier:set() for identifier in identifiers}
+    if identifiers:
+        for identifier,instance_id in db.execute(select(m.InvestigationResource.investigation_id,
+                m.InvestigationResource.instance_id).where(m.InvestigationResource.investigation_id.in_(identifiers))):
+            resources[identifier].add(instance_id)
+    permitted={identifier for identifier,ids in resources.items() if ids and ids.issubset(allowed_data)}
+    reports={}
+    if permitted:
+        projection=select(m.Investigation.id,m.Investigation.status,m.Investigation.window_start,
+            m.Investigation.window_end,m.Investigation.task_id,
+            m.Investigation.report['executive_summary']['headline'].as_string().label('headline'),
+            m.Investigation.report['coverage']['complete'].as_boolean().label('coverage_complete')
+        ).where(m.Investigation.id.in_(permitted))
+        reports={row.id:SimpleNamespace(**row._mapping) for row in db.execute(projection)}
+    task_ids={report.task_id for report in reports.values() if report.task_id}
+    tasks={row.id:row for row in db.execute(select(m.Task.id,m.Task.error_code,
+            m.Task.payload['mode'].as_string().label('mode')).where(m.Task.id.in_(task_ids)))} if task_ids else {}
+    subjects={event.id:event.instance_id for event,_ in rows}
+    return {event_id:reports[identifier] for event_id,identifier in chosen.items()
+            if identifier in reports and subjects[event_id] in resources[identifier]},tasks
+
+
+def _overview_observations(db, rows):
+    """Only timestamps and alert metadata; never materialize evidence payloads."""
+    identifiers={identifier for _,finding in rows if finding for identifier in (finding.evidence_ids or [])}
+    evidence={row.id:row for row in db.execute(select(m.Evidence.id,m.Evidence.instance_id,
+        m.Evidence.observed_at).where(m.Evidence.id.in_(identifiers)))} if identifiers else {}
+    episodes={}
+    event_ids={event.id for event,_ in rows}
+    if event_ids:
+        ranked=select(m.EventAlert.event_id,m.AlertOccurrence.status,
+            m.AlertOccurrence.evidence['latest']['source_observed_at'].as_string().label('source_at'),
+            m.AlertOccurrence.evidence['latest']['recovery_observed_at'].as_string().label('recovery_at'),
+            func.row_number().over(partition_by=m.EventAlert.event_id,
+                order_by=m.AlertOccurrence.last_seen_at.desc()).label('position')
+        ).join(m.AlertOccurrence,m.AlertOccurrence.id==m.EventAlert.alert_occurrence_id
+        ).where(m.EventAlert.event_id.in_(event_ids)).subquery()
+        for row in db.execute(select(ranked).where(ranked.c.position<=20)):
+            stamp=row.recovery_at if row.status=='recovered' else row.source_at
+            if stamp:
+                try: episodes.setdefault(row.event_id,[]).append(parse_time(stamp))
+                except HTTPException: pass
+    return evidence,episodes
+
+
+def _overview_issue(event,finding,instance,mapping,inv,task,evidence,episodes,db):
+    observed=[evidence[identifier].observed_at for identifier in (finding.evidence_ids or [])
+              if identifier in evidence and evidence[identifier].instance_id==event.instance_id] if finding else []
+    if finding and finding.category=='evidence_correlation' and inv:
+        observed_at=max(observed) if observed else inv.window_end
+    else:
+        observed.extend(episodes.get(event.id,[]))
+        observed_at=max(observed) if observed else event.last_seen_at
+    freshness=_report_freshness(db,event,inv,finding,observed_at=observed_at)
+    calculation=(finding.calculation or {}) if finding else {}
+    observation_state=calculation.get('observation_state')
+    summary=calculation.get('statement') if inv and finding and finding.category=='evidence_correlation' else None
+    if finding and finding.category=='baseline_change':
+        if (not mapping or not mapping.selected or calculation.get('config_revision')!=instance.config_revision
+                or calculation.get('mapping_version')!=mapping.version or calculation.get('source_id')!=mapping.source_id
+                or not any(str(item.get('hostid'))==str(calculation.get('hostid')) and str(item.get('itemid'))==str(calculation.get('itemid')) for item in mapping.items)):
+            observation_state='configuration_changed'
+        summary=(f"监控项 {calculation.get('itemid','')} 的近期中位数 {calculation.get('recent',{}).get('median','未知')}，"
+                 f"基线中位数 {calculation.get('baseline',{}).get('median','未知')}；仅表示持续变化，业务影响与原因待分析。")
+    # This headline belongs to the complete authorized report, not a freshly
+    # validated per-item fact. Keep that distinction explicit in the list.
+    if inv and inv.status in ('completed','partial') and inv.headline:
+        summary=(summary+' ' if summary else '')+'关联报告概览：'+inv.headline
+    if freshness['status']=='outdated': summary=freshness['reason']
+    if observation_state=='configuration_changed':
+        summary='当前监控选择或配置已变化；此处保留历史观测，需要依据新配置的后续样本重新判断。'
+    elif finding and finding.category=='baseline_change' and observation_state=='returned_to_baseline':
+        summary='后续实际样本已回到该指标原基线；这不代表业务整体健康或根因已解决。'
+    if not summary:
+        summary=('报告已形成；打开报告查看完整事实与证据。' if inv.status in ('completed','partial') else '分析尚未完成') if inv else '异常已登记，等待证据分析'
+    return {'id':event.id,'event_id':event.id,'title':event.title,'kind':finding.kind if finding else 'current',
+        'status':event.status,'severity':event.severity,'summary':('待核验假设：' if finding and finding.category=='evidence_correlation' else '')+summary,
+        'issue_category':_issue_category(finding),'report_freshness':freshness,'object_names':[instance.name],
+        'instance_ids':[instance.id],'first_seen_at':iso(event.created_at),'updated_at':iso(event.last_seen_at),
+        'investigation_id':inv.id if inv else None,'analysis_mode':task.mode or 'rules_only' if task else 'rules_only',
+        'coverage_status':'complete' if inv and inv.coverage_complete is True else 'partial' if inv else 'unknown',
+        'observation_state':observation_state,'finding_status':'hypothesis' if finding and finding.category=='evidence_correlation' else 'conditional_prediction' if finding and finding.kind=='risk' else 'observed',
+        'report_status':inv.status if inv else 'not_started','report_error':task.error_code if task else None}
 
 
 def overview(actor, **scope):
-    current_ids={row.id for row in actor.db.scalars(select(m.Instance)) if group_collection_allowed(actor.db,row)}
-    visible=_visible_ids(actor,scope)&_visible_ids(actor,scope,'event.read')&current_ids
-    issues=[]
-    for event in actor.db.scalars(select(m.Event).where(m.Event.instance_id.in_(visible),m.Event.status.notin_(TERMINAL_EVENTS)).order_by(m.Event.last_seen_at.desc()).limit(200)):
-        finding=actor.db.scalar(select(m.InspectionFinding).where(m.InspectionFinding.event_id==event.id))
-        if finding and (finding.calculation or {}).get('observation_state')=='recovered': continue
-        issues.append(issue_response(actor.db,event,finding,actor))
+    from sqlalchemy.orm import load_only
+    from .config import zabbix_only
     from .showcase import inspection_projection
-    objects=list(actor.db.scalars(select(m.Instance).where(m.Instance.id.in_(_visible_ids(actor,scope)),m.Instance.enabled.is_(True),m.Instance.lifecycle_state=="Active")))
-    objects=[row for row in objects if row.id in current_ids]
-    missing=0
-    for instance in objects:
-        mapping=mapping_for(actor.db,instance.id)
-        if mapping: missing+=sum(c['status']!='available' for c in mapping.capabilities)
-    return {'stats':{'current':sum(i['kind']=='current' for i in issues),'risk':sum(i['kind']=='risk' for i in issues),'objects':len(objects)},'issues':issues,'inspection':inspection_projection(actor.db,visible),'coverage':{'status':'partial' if missing else 'unknown','missing_count':missing}}
+    db=actor.db
+    # Evaluate live grants once per action, including revocation/session checks.
+    allowed_data=set(authorize(actor,'data.read').instance_ids)
+    allowed_events=set(authorize(actor,'event.read').instance_ids)
+    query=select(m.Instance).join(m.System,m.System.id==m.Instance.system_id).where(m.Instance.id.in_(allowed_data))
+    for key,column in [('instance_id',m.Instance.id),('system_id',m.System.id),('department_id',m.System.department_id),('environment',m.System.environment)]:
+        if scope.get(key): query=query.where(column==scope[key])
+    instances={row.id:row for row in db.scalars(query.options(load_only(m.Instance.id,m.Instance.name,
+        m.Instance.connection_mode,m.Instance.config_revision,m.Instance.enabled,m.Instance.lifecycle_state)))}
+    mappings={row.instance_id:row for row in db.scalars(select(m.MonitoringMapping).where(m.MonitoringMapping.instance_id.in_(instances)))} if instances else {}
+    current_ids={identifier for identifier,instance in instances.items() if not zabbix_only(db=db)
+        or (instance.connection_mode=='zabbix' and identifier in mappings and mappings[identifier].layer=='group' and mappings[identifier].selected)}
+    visible=current_ids&allowed_events
+    rows=list(db.execute(select(m.Event,m.InspectionFinding).outerjoin(m.InspectionFinding,m.InspectionFinding.event_id==m.Event.id)
+        .where(m.Event.instance_id.in_(visible),m.Event.status.notin_(TERMINAL_EVENTS))
+        .order_by(m.Event.last_seen_at.desc(),m.Event.id).limit(200)))
+    rows=[(event,finding) for event,finding in rows if not finding or (finding.calculation or {}).get('observation_state')!='recovered']
+    reports,tasks=_overview_reports(db,rows,allowed_data)
+    evidence,episodes=_overview_observations(db,rows)
+    issues=[_overview_issue(event,finding,instances[event.instance_id],mappings.get(event.instance_id),
+        reports.get(event.id),tasks.get(reports[event.id].task_id) if event.id in reports else None,
+        evidence,episodes,db) for event,finding in rows]
+    objects=[instance for identifier,instance in instances.items() if identifier in current_ids and instance.enabled and instance.lifecycle_state=='Active']
+    missing=sum(capability['status']!='available' for instance in objects if instance.id in mappings for capability in mappings[instance.id].capabilities)
+    historical={'returned_to_baseline','recovered','configuration_changed'}
+    return {'stats':{'current':sum(i['kind']=='current' and i.get('observation_state') not in historical for i in issues),'risk':sum(i['kind']=='risk' and i.get('observation_state') not in historical for i in issues),'objects':len(objects)},'issues':issues,'inspection':inspection_projection(db,visible),'coverage':{'status':'partial' if missing else 'unknown','missing_count':missing}}
 
 
 def issue_detail(actor, identifier):

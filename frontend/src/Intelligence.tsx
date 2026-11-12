@@ -1,6 +1,6 @@
 import { ExecutiveSummary } from './ExecutiveSummary';
 export { ExecutiveSummary } from './ExecutiveSummary';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import {
   Alert,
   Button,
@@ -19,12 +19,13 @@ import type { Row } from './api';
 import type { ExecutiveSummaryData } from './ExecutiveSummary';
 import type { EChartsOption } from 'echarts';
 import { query, text } from './api';
-import { useCan, useResource, useScope, useScopedPath } from './hooks';
+import { RESOURCE_REFRESH_MS, useCan, useResource, useScope, useScopedPath } from './hooks';
 import { Chart, ContextLink, LoadState, SourceCoverage, Status, Time, Title } from './ui';
 import { InvestigationReportView } from './Presentation';
 import {
   chartData,
   findingLabel,
+  isHistoricalObservation,
   frozenMetricPath,
   graphKinds,
   reportState,
@@ -106,27 +107,16 @@ export function InspectionStatus({ status, reason }: { status?: string; reason?:
 
 export function IntelligenceHome() {
   const can = useCan();
-  const { refresh } = useScope();
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => setTick((v) => v + 1), 3000);
-    return () => clearInterval(timer);
-  }, []);
+  const { refresh, rolling } = useScope();
   const path = useScopedPath('/intelligence/overview');
   const resource = useResource<IntelligenceOverview>(
     can('data.read') && can('event.read') ? path : null,
-    refresh + tick,
+    refresh,
   );
   const recentPath = useScopedPath('/investigations', { limit: 3 });
-  const recent = useResource<{ items: Row[] }>(can('data.read') ? recentPath : null, refresh + tick);
-  const retained = useRef<{ path: string; data?: IntelligenceOverview }>({ path });
-  const retainedRecent = useRef<{ path: string; data?: { items: Row[] } }>({ path: recentPath });
-  if (retained.current.path !== path || resource.error) retained.current = { path };
-  if (resource.data) retained.current = { path, data: resource.data };
-  if (retainedRecent.current.path !== recentPath || recent.error) retainedRecent.current = { path: recentPath };
-  if (recent.data) retainedRecent.current = { path: recentPath, data: recent.data };
-  const data = resource.data ?? retained.current.data;
-  const recentData = recent.data ?? retainedRecent.current.data;
+  const recent = useResource<{ items: Row[] }>(can('data.read') ? recentPath : null, refresh);
+  const data = resource.data;
+  const recentData = recent.data;
   return (
     <div className="intel-page">
       <Title
@@ -192,7 +182,7 @@ export function IntelligenceHome() {
                   <IssueSection
                     title="当前问题"
                     description="优先处理正在发生的异常"
-                    issues={data.issues.filter((i) => i.kind === 'current')}
+                    issues={data.issues.filter((i) => i.kind === 'current' && !isHistoricalObservation(i))}
                     empty={
                       data.inspection.last_completed_at
                         ? '最近已完成巡检未返回当前问题。仍请关注来源覆盖和未核对项。'
@@ -202,14 +192,20 @@ export function IntelligenceHome() {
                   <IssueSection
                     title="潜在风险"
                     description="尚未确认为故障，候选解释与条件预测分别标明"
-                    issues={data.issues.filter((i) => i.kind === 'risk')}
+                    issues={data.issues.filter((i) => i.kind === 'risk' && !isHistoricalObservation(i))}
                     empty="当前没有足够证据支持的潜在风险或待核验假设。数据不足时不生成精确预测。"
                   />
+                  {data.issues.some(isHistoricalObservation) && <IssueSection
+                    title="历史观测"
+                    description="指标已回到原基线，或监控配置已变化；保留报告供回查，不代表根因已解决。"
+                    issues={data.issues.filter(isHistoricalObservation)}
+                    empty="暂无历史观测。"
+                  />}
                 </>
               )}
               <LoadState {...recent} loading={recent.loading && !recentData} retry={recent.reload}>{recentData && <RecentAnalyses reports={recentData.items} />}</LoadState>
               <div className="intel-bottom-note">
-                <span>结果来自后台巡检；本页每 3 秒刷新状态。</span>
+                <span>结果来自后台巡检；{rolling ? '本页每 60 秒读取一次状态，阅读位置保持不变。' : '自动刷新已关闭，可手动刷新读取结果。'}</span>
 
               </div>
             </>
@@ -754,7 +750,7 @@ export function IssueReport() {
       !['pending', 'outdated'].includes(data?.report_freshness?.status ?? '')
     )
       return;
-    const timer = setInterval(() => setTick((value) => value + 1), 15000);
+    const timer = setInterval(() => setTick((value) => value + 1), RESOURCE_REFRESH_MS);
     return () => clearInterval(timer);
   }, [state, id, data?.report_freshness?.status]);
   return (

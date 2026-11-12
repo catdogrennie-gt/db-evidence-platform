@@ -12,18 +12,20 @@ DB Evidence Platform 是一个基于已有监控数据的 **AI 数据库运维�
 
 ## 在线体验
 
-**[快速演示：免登录体验一次故障](https://premium-prozac-barbara-develop.trycloudflare.com)** · **[完整平台：查看分析、监控与报告](https://genesis-bomb-lessons-compiler.trycloudflare.com)**
+**[快速演示：免登录体验一次故障](https://representatives-remedies-eva-effectively.trycloudflare.com)** · **[完整平台：查看分析、监控与报告](https://screens-sponsor-kijiji-julie.trycloudflare.com)**
 
 完整平台只读账号：`demo` / `EvidenceDemo-2026!`。两个入口使用临时网址，依赖演示电脑在线。
 
 <details>
 <summary>展开演示操作说明</summary>
 
-1. 打开快速演示，开启固定的 MySQL 锁等待开关。
-2. 同页观察平台自动检查、分析和生成报告，也可进入完整平台查看图表与证据。
-3. 关闭开关，查看后续采样是否恢复。开关操作影响共享测试环境。
+1. 打开快速演示，选择 SQL 效率、连接池、临时表等场景，先看业务现象与告警对照说明，再打开唯一故障开关。
+2. 同页观察实际指标、平台自主发现和报告，也可用只读账号进入完整平台查看趋势与证据。
+3. 关闭开关，分别查看负载清理与后续监控恢复。所有访客共享一个故障开关，重复打开不会叠加。
 
-快速演示只制造隔离测试故障并临时加快检查；报告由完整平台根据 Zabbix 数据自行发现和分析。等待时间、历史报告和失败状态的解释见[演示指南](docs/quick-showcase.md)。
+页面每 60 秒更新内容，保留展开和阅读位置，也可手动刷新。场景目录明确区分已验证部分与待优化分析；有报告不等于确认根因。
+
+快速演示只制造隔离测试故障并临时加快检查；报告由完整平台根据 Zabbix 数据自行发现和分析。操作方法见[操作手册](docs/operator-manual.md)，逐项状态见[验证清单](docs/validation-scenarios.md)。
 
 </details>
 
@@ -35,6 +37,16 @@ DB Evidence Platform 是一个基于已有监控数据的 **AI 数据库运维�
 | **后台持续检查** | 配好范围和周期后自动取数、检查异常、安排分析，无需一直打开网页 |
 | **AI 联合分析** | 关联数据库与主机等数据，分析当前告警规则之外的问题线索，解释现象、比较可能原因并提出建议；信息不足时说明缺什么 |
 | **结论与依据一起看** | 先看问题摘要，再查看指标曲线、关联关系和支持结论的数据 |
+
+### 如何看出联合分析的价值
+
+| 实际验证场景 | 当时的 Zabbix 配置为何没有对应告警 | 平台发现什么、还缺什么 |
+| --- | --- | --- |
+| **SQL 效率退化**：扫描行数从约 20 增至 4,799，请求与 SQL 耗时一起变化 | 本次窗口官方慢查询速率实际为 0，未触发已启用的阈值规则 | 自动发现持续基线变化，关联扫描代价与耗时；尚未确认具体 SQL 或执行计划根因 |
+| **应用连接池紧张**：池占用达 6、获取等待约 600ms，请求出现失败 | 数据库仅约 9/40 个连接，没有数据库连接耗尽事件；应用池限制与数据库总连接限制是两回事 | 已关联池占用、等待与错误；模型输入遗漏池容量与 DB 上限，9/40 余量是另行实测，诊断仍待完善 |
+| **临时表查询代价上升**：磁盘临时表约 4 张/秒，请求耗时约 44ms | 当前官方规则要求速率超过 10 张/秒并持续 5 分钟，本次未触发 | 已发现跨层变化与恢复；本轮 AI 解释仍过于通用，**尚未分析到临时表机制，继续改进** |
+
+以上为 **2026-11-12 隔离环境的单次实测**，不是准确率或生产效果。Zabbix 可以配置更细的规则；这里验证的是在当时真实配置下，平台能否补充发现、关联解释，并如实暴露分析缺口。完整的三段说明、测量口径与改进记录见[验证与改进](docs/platform-evolution.md)。
 
 **问题报告：先看结论，再按需核对分析过程。**
 
@@ -162,6 +174,7 @@ $platformConfig = 'D:\Private\DBEvidence\config.json'
 
 ## 更多文档
 
+- [操作手册](docs/operator-manual.md) · [场景验证清单](docs/validation-scenarios.md) · [验证与改进记录](docs/platform-evolution.md)
 - [项目演化与取舍](docs/project-evolution.md) · [技术架构与开发过程](docs/project-overview.md)
 - [部署与运维](docs/platform/07-operations.md) · [使用指南](docs/user-guide.md)
 - [官方 Zabbix 模板与诊断扩展](docs/zabbix-official-setup.md) · [真实实验验收](docs/acceptance-quick-showcase.md)

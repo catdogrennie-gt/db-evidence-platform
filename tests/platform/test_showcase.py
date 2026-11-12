@@ -43,6 +43,47 @@ def snapshot_row(e, rows, *, ago=1, complete=True, itemid='42'):
     e['db'].add(row); e['db'].commit(); return row
 
 
+def test_multiple_fixed_targets_have_isolated_config_and_no_arbitrary_ids(showcase_env):
+    from platform_app import showcase
+    e=showcase_env
+    original=dict(e['config'].showcase)
+    e['config'].showcase['targets']=[{'key':'svc-a','instance_id':e['a'].id,
+        'policy_id':e['policy'].id,'reader_user_id':e['reader'].user_id,
+        'projection_mode':'numeric','fast_ai_seconds':60}]
+    selected=showcase.select_target(e['config'],'svc-a')
+    assert selected is not e['config']
+    assert selected.showcase['instance_id']==e['a'].id
+    assert selected.showcase['projection_mode']=='numeric'
+    assert e['config'].showcase['instance_id']==original['instance_id']
+    with pytest.raises(HTTPException) as exc: showcase.select_target(e['config'],e['a'].id)
+    assert exc.value.status_code==404
+    with pytest.raises(HTTPException): showcase.select_target(e['config'],'../svc-a')
+
+
+def test_optional_ai_cadence_lease_uses_normal_scheduler_and_restores(showcase_env):
+    from platform_app import showcase
+    e=showcase_env
+    e['config'].showcase['fast_ai_seconds']=60
+    old=e['policy'].ai_interval_seconds
+    tasks_before=e['db'].scalar(select(func.count()).select_from(m.Task))
+    result=showcase.set_pacing(e['db'],e['config'],True)
+    assert result['ai_seconds']==60 and e['policy'].ai_interval_seconds==60
+    assert e['policy'].next_ai_at>utcnow()-timedelta(seconds=1)
+    assert e['db'].scalar(select(func.count()).select_from(m.Task))==tasks_before
+    showcase.set_pacing(e['db'],e['config'],False)
+    assert e['policy'].ai_interval_seconds==old
+
+
+def test_numeric_projection_does_not_claim_no_locks_means_healthy(showcase_env):
+    from platform_app import showcase
+    e=showcase_env
+    e['config'].showcase['projection_mode']='numeric'
+    value=showcase.snapshot(e['db'],e['config'])
+    assert value['observation']['status']=='unknown'
+    assert value['observation']['metrics']==[]
+    assert value['report'] is None
+
+
 def test_token_fixed_target_and_input_contract(showcase_env):
     from platform_app.showcase import authenticate, snapshot
     e=showcase_env

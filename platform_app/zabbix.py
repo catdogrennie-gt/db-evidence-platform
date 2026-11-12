@@ -1,4 +1,5 @@
 """Bounded read-only JSON-RPC. Upstream errors and tokens never cross this boundary."""
+from contextlib import contextmanager, nullcontext
 import json
 import time
 from urllib.parse import urlsplit, urlunsplit
@@ -27,20 +28,46 @@ class ZabbixClient:
         self.url, self._token = normalize_url(url), token
         self.deadline = time.monotonic() + deadline_seconds
         self.calls = 0
+        self._client = None
+
+    @contextmanager
+    def batch(self):
+        """Reuse a pool only inside this caller-owned, single-source operation.
+
+        No global pool or credential cache is retained. Budgets belong to this
+        ZabbixClient and are not reset by entering another batch.
+        """
+        if self._client is not None:
+            yield self
+            return
+        with httpx.Client(timeout=8, follow_redirects=False, trust_env=False) as client:
+            self._client = client
+            try:
+                yield self
+            finally:
+                self._client = None
+
+    def _remaining(self):
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise PlatformError(503, 'monitoring_budget_exceeded', '监控查询超过时间或调用预算。')
+        return remaining
 
     def call(self, method, params):
         if method not in READ_METHODS:
             raise PlatformError(422, 'monitoring_readonly', '仅允许已注册只读监控接口。')
-        remaining = self.deadline - time.monotonic()
+        self._remaining()
         self.calls += 1
-        if remaining <= 0 or self.calls > 48:
+        if self.calls > 48:
             raise PlatformError(503, 'monitoring_budget_exceeded', '监控查询超过时间或调用预算。')
         try:
-            with httpx.Client(timeout=min(8, remaining), follow_redirects=False, trust_env=False) as client:
-                with client.stream('POST', self.url, headers={'Authorization': 'Bearer ' + self._token, 'Content-Type': 'application/json-rpc'}, json={'jsonrpc': '2.0', 'id': self.calls, 'method': method, 'params': params}) as response:
+            scope = nullcontext(self._client) if self._client is not None else httpx.Client(timeout=8, follow_redirects=False, trust_env=False)
+            with scope as client:
+                with client.stream('POST', self.url, timeout=min(8, self._remaining()), headers={'Authorization': 'Bearer ' + self._token, 'Content-Type': 'application/json-rpc'}, json={'jsonrpc': '2.0', 'id': self.calls, 'method': method, 'params': params}) as response:
                     if response.status_code != 200: raise ValueError()
                     chunks, size = [], 0
                     for chunk in response.iter_bytes():
+                        self._remaining()
                         size += len(chunk)
                         if size > 2_000_000: raise ValueError()
                         chunks.append(chunk)

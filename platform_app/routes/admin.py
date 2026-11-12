@@ -1243,7 +1243,7 @@ def update_model_profile(
             "name": str(body.get("name", "默认模型配置"))[:120],
         }
     )
-    for key, maximum in [("max_calls", 4), ("max_tokens", 3000), ("timeout_seconds", 180)]:
+    for key, maximum in [("max_calls", 4), ("max_tokens", 4096), ("timeout_seconds", 180)]:
         if key in body:
             try:
                 number = int(body[key])

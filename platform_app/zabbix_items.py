@@ -9,6 +9,17 @@ ITEM_OUTPUT = ['itemid','hostid','name','key_','units','value_type','description
 TAG_NAMES = {'component','application','service','layer','environment','role','source','semantics','scope'}
 
 
+def numeric_semantics(row):
+    """Explicit tags or Zabbix's rate transform; never infer from display names."""
+    declared={t.get('value') for t in row.get('tags',[]) if isinstance(t,dict) and t.get('tag')=='semantics'}
+    derived=any(str(p.get('type'))=='10' for p in row.get('preprocessing',[]) if isinstance(p,dict))
+    if len(declared)>1 or declared and (not declared.issubset({'gauge','rate','counter'}) or derived and declared!={'rate'}):
+        return 'unknown','conflicting_semantics'
+    if derived: return 'rate','zabbix_change_per_second'
+    if declared: return next(iter(declared)),'zabbix_tag'
+    return 'unknown','unverified'
+
+
 def value_kind(value_type):
     return {0:'numeric',3:'numeric',1:'text',4:'text',2:'log'}.get(int(value_type),'unsupported')
 
@@ -36,6 +47,7 @@ def _metadata_base(row, host, by_id):
 
 def metadata(row,host,by_id):
     item=_metadata_base(row,host,by_id)
+    item['value_semantics'],item['semantics_source']=numeric_semantics(row)
     item['poll_interval']=item['interval']; item['history_semantics']='periodic_samples'; item['heartbeat_seconds']=None
     preprocessing=[p for p in row.get('preprocessing',[]) if isinstance(p,dict) and str(p.get('type')) in ('19','20')]
     if preprocessing:
@@ -118,7 +130,7 @@ def safe_text(value,limit=160):
 
 def safe_item(item):
     # Keys may embed DSNs/credentials as parameters. Identity is kept separately.
-    result={k:item[k] for k in ('hostid','itemid','value_type','value_kind','interval','interval_verified','history_semantics','heartbeat_seconds','poll_interval','metric_semantic') if k in item}
+    result={k:item[k] for k in ('hostid','itemid','value_type','value_kind','interval','interval_verified','history_semantics','heartbeat_seconds','poll_interval','metric_semantic','value_semantics','semantics_source') if k in item}
     for k in ('name','host_name','units'): result[k]=safe_text(item.get(k),160)
     result['description_omitted']=True
     result['key']=safe_text(str(item.get('key','')).split('[',1)[0])

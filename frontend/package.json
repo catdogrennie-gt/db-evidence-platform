@@ -10,18 +10,19 @@
     "build": "tsc --noEmit && vite build"
   },
   "dependencies": {
+    "antd": "6.7.0",
+    "echarts": "6.1.0",
     "react": "19.2.9",
     "react-dom": "19.2.9",
-    "react-router-dom": "7.18.5",
-    "antd": "6.7.0",
-    "echarts": "6.1.0"
+    "react-router-dom": "7.18.5"
   },
   "devDependencies": {
-    "typescript": "5.9.3",
-    "vite": "8.3.6",
-    "@vitejs/plugin-react": "6.2.1",
+    "@types/node": "24.10.0",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.7",
-    "@types/node": "24.10.0"
+    "@vitejs/plugin-react": "6.2.1",
+    "react-test-renderer": "19.2.9",
+    "typescript": "5.9.3",
+    "vite": "8.3.6"
   }
 }

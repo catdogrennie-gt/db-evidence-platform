@@ -1,4 +1,5 @@
 """Single-source, exact-item analysis objects reusing Instance authorization."""
+from contextlib import nullcontext
 from datetime import timedelta
 from uuid import uuid4
 import hashlib
@@ -206,11 +207,19 @@ def lock_snapshot_metadata(item,parsed):
 
 
 def collect_group(db,instance,mapping,source,lease,config):
-    from .monitoring import client_for,digest_window
+    from .monitoring import client_for
+    client=client_for(source,config)
+    batch=getattr(client,'batch',None)
+    with batch() if callable(batch) else nullcontext(client):
+        return _collect_group(db,instance,mapping,source,lease,config,client)
+
+
+def _collect_group(db,instance,mapping,source,lease,config,client):
+    from .monitoring import digest_window
     from .evidence import append_batch
     from .scheduling import check_fence,complete,db_now
     from .events import evaluate
-    client=client_for(source,config); items,_=resolve(client,source,mapping.items)
+    items,_=resolve(client,source,mapping.items)
     end=utcnow(); start=end-timedelta(minutes=10); entries=[]; observed=[]
     run=m.CollectionRun(task_id=lease.id,instance_id=instance.id,collector='monitoring',attempt=lease.attempt,config_revision=instance.config_revision,fence=lease.fence,status='running',started_at=db_now(db)); db.add(run); db.flush()
     for item in items:

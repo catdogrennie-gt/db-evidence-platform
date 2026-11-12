@@ -275,7 +275,8 @@ def test_optional_digest_snapshot_preserves_units_without_inventing_epoch(group_
 
 
 @pytest.mark.parametrize('missing_last,active_lock',[(False,False),(True,False),(False,True)])
-def test_real_model_payload_keeps_large_group_numeric_context_and_frozen_tool(group_env,missing_last,active_lock):
+@pytest.mark.parametrize('total_budget_pressure',[False,True])
+def test_real_model_payload_keeps_large_group_numeric_context_and_frozen_tool(group_env,missing_last,active_lock,total_budget_pressure):
     from platform_app.analysis_groups import save_group
     from platform_app.monitoring import handle_collection
     from platform_app.scheduling import enqueue,claim
@@ -322,8 +323,10 @@ def test_real_model_payload_keeps_large_group_numeric_context_and_frozen_tool(gr
             else: assert len(rows)==18 and series['omitted_count']==0
             assert any(r['kind']=='depends_on' and r['provenance']=='user_registered' for r in series['registered_relationships'])
             reference.append(next(row[columns.index('evidence_id')] for row in reversed(rows) if row[columns.index('sample_count')]))
-            return {'choices':[{'message':{'role':'assistant','content':None,'tool_calls':[{'id':'frozen1','type':'function','function':{'name':'get_metric_window','arguments':json.dumps({'instance_id':instance.id,'manifest_item_ids':[reference[0].removeprefix('manifest:')]})}}]}}], 'usage':{'prompt_tokens':100,'completion_tokens':100}}
+            return {'choices':[{'message':{'role':'assistant','content':None,'tool_calls':[{'id':'frozen1','type':'function','function':{'name':'get_metric_window','arguments':json.dumps({'instance_id':instance.id,'manifest_item_ids':[reference[0].removeprefix('manifest:')]})}}]}}], 'usage':{'prompt_tokens':12000 if total_budget_pressure else 100,'completion_tokens':200 if total_budget_pressure else 100}}
         results=[json.loads(msg['content']) for msg in payload['messages'] if msg['role']=='tool']
+        if total_budget_pressure:
+            assert 12200+len(json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode())+512+payload['max_tokens']<=32000
         assert results and results[0]['items']
         assert any(item['evidence_id']==reference[0] and (item.get('points') or item.get('summary')) for item in results[0]['items'])
         return provider_response(reference[0])

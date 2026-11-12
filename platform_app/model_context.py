@@ -5,7 +5,7 @@ import json
 from .common import iso, parse_time, PlatformError
 from .zabbix_items import safe_item,safe_relations
 
-SERIES_COLUMNS=['evidence_id','resource','hostid','itemid','name','key','unit','sample_count','first','last','min','max','missing_count','complete','reason_codes','last_time','original_point_count','sampling_method']
+SERIES_COLUMNS=['evidence_id','resource','hostid','itemid','name','key','unit','sample_count','first','last','min','max','missing_count','complete','reason_codes','last_time','original_point_count','sampling_method','value_semantics','semantics_source']
 
 
 def _snapshot_time(item):
@@ -86,7 +86,7 @@ def add_series(series,metric,payload,values):
     reasons=sorted(set(str(g.get('reason',g.get('reason_code','unknown'))) if isinstance(g,dict) else str(g) for g in [*(payload.get('gaps') or []),*(coverage.get('reason_codes') or [])]))[:3]
     valid=[p for p in payload.get('points',[]) if isinstance(p.get('value'),(int,float)) and p.get('validity','valid')=='valid']
     sampling=coverage.get('sampling') or {}
-    series['rows'].append(['manifest:'+metric.id,series['resources'].index(resource),item.get('hostid'),item.get('itemid'),item.get('name','')[:40],item.get('key','')[:56],item.get('units','')[:24],len(values),values[0] if values else None,values[-1] if values else None,min(values) if values else None,max(values) if values else None,len(payload.get('points',[]))-len(values),coverage.get('complete') is True,reasons,valid[-1]['time'] if valid else None,sampling.get('original_point_count',len(payload.get('points',[]))),sampling.get('method','none')])
+    series['rows'].append(['manifest:'+metric.id,series['resources'].index(resource),item.get('hostid'),item.get('itemid'),item.get('name','')[:40],item.get('key','')[:56],item.get('units','')[:24],len(values),values[0] if values else None,values[-1] if values else None,min(values) if values else None,max(values) if values else None,len(payload.get('points',[]))-len(values),coverage.get('complete') is True,reasons,valid[-1]['time'] if valid else None,sampling.get('original_point_count',len(payload.get('points',[]))),sampling.get('method','none'),item.get('value_semantics','unknown'),item.get('semantics_source','unverified')])
 
 
 def compact_coverage(coverage):
@@ -108,10 +108,25 @@ def context_refs(bundle):
 def compact_initial(bundle):
     initial=deepcopy(bundle); initial['coverage']=compact_coverage(initial.get('coverage'))
     series=initial.get('numeric_series') or {}; refs={r[0] for r in series.get('rows',[])}
+    # Intern repeated metadata without deleting a metric, changing a number or
+    # making partial coverage appear complete. Each *_ref is an explicit index
+    # into its dictionary; the frozen manifest itself remains unchanged.
+    columns=series.get('columns',[])
+    for name in ('reason_codes','sampling_method','semantics_source'):
+        if name not in columns: continue
+        index=columns.index(name); dictionary=[]
+        for row in series.get('rows',[]):
+            value=row[index]
+            if value not in dictionary: dictionary.append(value)
+            row[index]=dictionary.index(value)
+        if dictionary:
+            columns[index]=name+'_ref'
+            series[name+'_dictionary']=dictionary
     resources=series.get('resources',[])
     identities={(resources[r[1]]['instance_id'],r[2],r[3]) for r in series.get('rows',[])}
     original=initial.get('evidence',[])
-    initial['evidence']=[item for item in original if item['evidence_id'] not in refs and not (str(item.get('source','')).startswith('zabbix.item.numeric:') and (item.get('instance_id'),(item.get('data') or {}).get('item',{}).get('hostid'),(item.get('data') or {}).get('item',{}).get('itemid')) in identities)]
+    trigger_refs={ref for signal in initial.get('inspection_signals',[]) for ref in signal.get('evidence_ids',[])}
+    initial['evidence']=[item for item in original if item['evidence_id'] in trigger_refs or (item['evidence_id'] not in refs and not (str(item.get('source','')).startswith('zabbix.item.numeric:') and (item.get('instance_id'),(item.get('data') or {}).get('item',{}).get('hostid'),(item.get('data') or {}).get('item',{}).get('itemid')) in identities))]
     initial['coverage']['duplicate_numeric_projections_omitted']=len(original)-len(initial['evidence'])
     return initial
 

@@ -6,6 +6,7 @@ import {
   Card,
   Checkbox,
   Drawer,
+  Descriptions,
   Form,
   Input,
   InputNumber,
@@ -13,12 +14,14 @@ import {
   Space,
   Switch,
   Tabs,
+  Table,
+  Tag,
   Typography,
 } from 'antd';
 import { Link, useLocation } from 'react-router-dom';
 import { pageItems, rows, text } from './api';
 import type { Page, Row } from './api';
-import { useCan, useResource, useScope, useScopedNavigate } from './hooks';
+import { useCan, useResource, useScope, useScopedNavigate, useScopedPath } from './hooks';
 import {
   DataTable,
   ErrorNotice,
@@ -44,6 +47,7 @@ export function Admin() {
   const can = useCan();
   const location = useLocation();
   const navigate = useScopedNavigate();
+  if (can('configuration.read') && !adminPages.some(p => can(...p[2]))) return <ReadonlySettings />;
   const active = location.pathname.split('/')[2] ?? adminPages.find((p) => can(...p[2]))?.[0];
   const pages = adminPages.filter((p) => can(...p[2]));
   return (
@@ -78,6 +82,73 @@ export function Admin() {
       )}
     </>
   );
+}
+
+interface ReadonlySnapshot {
+  sources: Row[]; systems: Row[]; objects: Row[]; policies: Row[]; rules: Row[];
+  model: Row; tasks: Row[]; platform: Row; access: Row;
+}
+
+function ReadonlySettings() {
+  const { refresh } = useScope();
+  const path = useScopedPath('/readonly/overview');
+  const resource = useResource<ReadonlySnapshot>(path, refresh);
+  return <>
+    <Title title="配置与运行状态 · 只读" description="查看平台如何接入、检查和分析演示业务；本页不提交任何变更或分析任务。" />
+    <LoadState {...resource} retry={resource.reload}>{resource.data && <ReadonlySettingsView data={resource.data} />}</LoadState>
+  </>;
+}
+
+export function ReadonlySettingsView({ data }: { data: ReadonlySnapshot }) {
+  const objectNames = new Map(data.objects.map(row => [text(row.id), text(row.name)]));
+  const names = (ids: unknown) => Array.isArray(ids) ? ids.map(id => objectNames.get(String(id)) ?? '已授权对象').join('、') : '—';
+  return <div className="intel-page">
+    <Alert type="info" showIcon title="完整浏览，操作只读" description="业务指标、分析结果与配置状态均在当前演示授权范围内。保存、启停、主动分析及凭据管理由管理员操作。" />
+    <div className="intel-form-pair">
+      <Card title="业务范围"><Descriptions size="small" column={1} items={[
+        { key: 'scope', label: '可见范围', children: `${text(data.access.system_count)} 个业务系统 / ${text(data.access.object_count)} 个联合对象` },
+        { key: 'role', label: '当前角色', children: <Tag>演示访客 · 只读</Tag> },
+        { key: 'write', label: '可用操作', children: '查看、筛选、查询；不可写入或触发任务' },
+      ]} /><p>{data.systems.map(row => `${text(row.name)}（${text(row.environment)}）`).join('、') || '当前范围没有业务系统'}</p></Card>
+      <Card title="分析模型与安全边界"><Descriptions size="small" column={1} items={[
+        { key: 'model', label: '模型', children: `${text(data.model.provider)} / ${text(data.model.model)}` },
+        { key: 'configured', label: '配置状态', children: data.model.configured ? '已配置' : '尚未配置' },
+        { key: 'access', label: '模型能力', children: '只读获准的脱敏证据，不执行 SQL、Shell 或数据库变更' },
+      ]} /></Card>
+    </div>
+    <Card title="Zabbix 来源"><Table<Row> rowKey="id" size="small" pagination={false} dataSource={data.sources} columns={[
+      { title: '来源', dataIndex: 'name' }, { title: '状态', render: (_, row) => <Status value={row.status} /> },
+      { title: '联合对象', dataIndex: 'group_count' }, { title: '主机', dataIndex: 'host_count' }, { title: '已选监控项', dataIndex: 'item_count' },
+      { title: '最近成功', render: (_, row) => <Time value={row.last_success_at} /> },
+    ]} scroll={{ x: 650 }} locale={{ emptyText: '当前范围没有已关联来源' }} /></Card>
+    <Card title="实际运行的巡检策略"><Table<Row> rowKey="id" size="small" pagination={false} dataSource={data.policies} columns={[
+      { title: '分析范围', render: (_, row) => names(row.instance_ids) },
+      { title: '状态', render: (_, row) => <><Tag>{row.enabled ? '已启用' : '已停用'}</Tag><Status value={row.status} /></> },
+      { title: '检查周期', render: (_, row) => `${text(row.signal_interval_seconds)} 秒` },
+      { title: '综合分析周期', render: (_, row) => `${text(row.ai_interval_seconds)} 秒` },
+      { title: '分析方式', render: (_, row) => row.mode === 'live_redacted' ? '脱敏 AI 分析' : '确定性规则' },
+      { title: '最近检查', render: (_, row) => <Time value={row.last_checked_at} /> },
+      { title: '最近分析完成', render: (_, row) => <Time value={row.last_completed_at} /> },
+    ]} scroll={{ x: 850 }} locale={{ emptyText: '当前范围尚无完整获准的服务策略' }} /></Card>
+    <Card title="已配置规则"><Table<Row> rowKey="id" size="small" pagination={false} dataSource={data.rules} columns={[
+      { title: '规则', dataIndex: 'name' }, { title: '类型', dataIndex: 'template' },
+      { title: '范围', render: (_, row) => names(row.instance_ids) },
+      { title: '启用', render: (_, row) => row.enabled ? '是' : '否' },
+      { title: '阈值参数', render: (_, row) => Object.entries((row.parameters ?? {}) as Row).map(([key, value]) => `${key}: ${text(value)}`).join('；') || '—' },
+    ]} locale={{ emptyText: '当前范围没有单独配置的规则；周期综合分析仍按巡检策略运行' }} /></Card>
+    <Card title="后台执行与最近任务">
+      <Space wrap><span>平台数据库 <Status value={data.platform.control_database} /></span>{rows(data.platform.workers).map(row => <span key={text(row.queue)}>{row.queue === 'ai' ? 'AI 分析' : row.queue === 'collection' ? '数据处理' : '后台队列'} <Status value={row.status} /></span>)}</Space>
+      <Table<Row> rowKey="id" size="small" pagination={false} dataSource={data.tasks} columns={[
+        { title: '任务', render: (_, row) => row.type === 'investigation' ? '问题分析' : row.type === 'verification' ? '核验' : '数据处理' },
+        { title: '范围', render: (_, row) => names(row.instance_ids) },
+        { title: '状态', render: (_, row) => <Status value={row.status} /> },
+        { title: '创建', render: (_, row) => <Time value={row.created_at} /> },
+        { title: '完成', render: (_, row) => <Time value={row.finished_at} /> },
+        { title: '错误代码', dataIndex: 'error_code' },
+      ]} scroll={{ x: 650 }} locale={{ emptyText: '当前范围暂无可见任务' }} />
+      <p className="intel-muted">仅展示最近任务的安全状态摘要。分析报告与图表从“问题分析”和“数据查看”进入；人员资料、凭据及原始内部错误不在公开页展示。</p>
+    </Card>
+  </div>;
 }
 function Organization() {
   const [kind, setKind] = useState('systems');
@@ -1013,7 +1084,7 @@ function AiPolicies() {
                 <InputNumber min={1} max={4} />
               </Form.Item>
               <Form.Item name="max_tokens" label="每轮输出 Token 上限" initialValue={2000}>
-                <InputNumber min={1} max={3000} />
+                <InputNumber min={1} max={4096} />
               </Form.Item>
               <Alert type="warning" title="模型配置不会自动授权任何业务资料外发。" />
             </>

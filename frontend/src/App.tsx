@@ -22,6 +22,7 @@ import {
   SessionContext,
   useCan,
   useResource,
+  RESOURCE_REFRESH_MS,
 } from './hooks';
 import type { Scope } from './hooks';
 import {
@@ -177,7 +178,7 @@ export const menuDefinitions = [
   { key: '/', label: '问题分析', symbol: '◈', permissions: ['data.read', 'event.read'] },
   { key: '/monitoring', label: 'Zabbix 接入', symbol: '▤', permissions: ['data.read', 'asset.onboard'] },
   { key: '/metrics', label: '数据查看', symbol: '▥', permissions: ['data.read'] },
-  { key: '/admin', label: '配置', symbol: '⚙', permissions: ['investigation.create', 'user.manage', 'grant.manage', 'group.manage', 'organization.manage', 'settings.manage', 'platform.read', 'audit.read', 'rule.manage', 'model_policy.manage'] },
+  { key: '/admin', label: '配置', symbol: '⚙', permissions: ['configuration.read', 'investigation.create', 'user.manage', 'grant.manage', 'group.manage', 'organization.manage', 'settings.manage', 'platform.read', 'audit.read', 'rule.manage', 'model_policy.manage'] },
 ];
 
 function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
@@ -202,6 +203,12 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
     to: search.get('to') ?? initial.to,
     timezone: search.get('timezone') ?? 'Asia/Shanghai',
   };
+  // A typed/manual URL or history navigation freezes the old window immediately,
+  // before the effect below disables rolling. Only our own timer may retain it.
+  const rollingActive = rolling
+    && !location.pathname.match(/^\/(issues|investigations|evidence|events|knowledge)\/.+/)
+    && (!search.has('from') || scope.from === rollingWindow.current.from)
+    && (!search.has('to') || scope.to === rollingWindow.current.to);
   const departments = useResource<Page>('/departments');
   const systems = useResource<Page>('/systems');
   const assets = useResource<Page<Instance>>(
@@ -220,7 +227,7 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
       );
   }, [initial, search, setSearch]);
   useEffect(() => {
-    if (!rolling || location.pathname.match(/^\/(issues|investigations|evidence|events|knowledge)\/.+/)) return;
+    if (!rollingActive) return;
     const interval = setInterval(() => {
       const next = { from: new Date(Date.now() - 3600000).toISOString(), to: new Date().toISOString() };
       rollingWindow.current = next;
@@ -233,9 +240,9 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
         { replace: true },
       );
       setRefresh((v) => v + 1);
-    }, location.pathname === '/' ? 3000 : 30000);
+    }, RESOURCE_REFRESH_MS);
     return () => clearInterval(interval);
-  }, [rolling, setSearch, location.pathname]);
+  }, [rollingActive, setSearch, location.pathname]);
   useEffect(() => {
     if (location.pathname.match(/^\/(issues|investigations|evidence|events|knowledge)\/.+/))
       setRolling(false);
@@ -271,7 +278,7 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
     }
   }
   return (
-    <ScopeContext.Provider value={{ scope, params: query(scope as unknown as Row), refresh }}>
+    <ScopeContext.Provider value={{ scope, params: query(scope as unknown as Row), refresh, rolling: !!rollingActive }}>
       <Layout className="app-shell">
         <Layout.Sider
           width={214}
@@ -386,7 +393,7 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
                   style={{ width: 180 }}
                 />
               </Space>
-              <Tag>后端授权范围内</Tag>
+              <Tag>{can('configuration.read') && !can('investigation.create', 'asset.manage', 'settings.manage') ? '演示只读 · 可查看，不可操作' : '后端授权范围内'}</Tag>
             </div>
             <div className="timebar">
               <Space wrap>
@@ -422,6 +429,7 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
                 <Button
                   size="small"
                   onClick={() => {
+                    setRolling(false);
                     setSearch((p) => {
                       p.set('from', new Date(Date.now() - 3600000).toISOString());
                       p.set('to', new Date().toISOString());
@@ -434,9 +442,9 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
                 </Button>
               </Space>
               <Space>
-                <Switch size="small" checked={rolling} onChange={(value) => { rollingWindow.current = { from: scope.from, to: scope.to }; setRolling(value); }} />
-                <span>{rolling ? (location.pathname === '/' ? '滚动窗口 / 3 秒' : '滚动窗口 / 30 秒') : '自动刷新关闭'}</span>
-                <Button size="small" onClick={() => setRefresh((v) => v + 1)}>
+                <Switch size="small" checked={!!rollingActive} onChange={(value) => { rollingWindow.current = { from: scope.from, to: scope.to }; setRolling(value); }} />
+                <span>{rollingActive ? '滚动窗口 / 60 秒' : '自动刷新关闭'}</span>
+                <Button size="small" title="重新读取当前页面数据，不触发 AI 分析" onClick={() => setRefresh((v) => v + 1)}>
                   刷新
                 </Button>
               </Space>
