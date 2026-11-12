@@ -239,6 +239,31 @@ def _structure_fields(item, alias):
     return result
 
 
+def _verified_requested_lock_attributes(row, payload):
+    """The verified v2 producer joins attributes on REQUESTING_ENGINE_LOCK_ID.
+
+    Its current snapshot contract is independent of truncated history. Preserve
+    those history gaps in coverage; never infer roles from an item name alone.
+    """
+    contract = 'db-evidence-lock-snapshot-v2'
+    coverage = row.coverage if isinstance(row.coverage, dict) else {}
+    item = payload.get('item') if isinstance(payload.get('item'), dict) else {}
+    rows = payload.get('rows')
+    count = coverage.get('snapshot_total_row_count')
+    tags = item.get('tags') if isinstance(item.get('tags'), list) else []
+    declared = [tag.get('value') for tag in tags
+                if isinstance(tag, dict) and tag.get('tag') == 'sl.snapshot_contract']
+    return (row.source == 'mysql.lock_waits'
+            and item.get('enhancement') == 'mysql.lock_waits'
+            and bool(declared) and all(value == contract for value in declared)
+            and coverage.get('snapshot_contract') == contract
+            and coverage.get('snapshot_complete') is True
+            and coverage.get('snapshot_truncated') is False
+            and type(count) is int and 0 <= count <= 50
+            and isinstance(rows, list) and len(rows) == count
+            and all(isinstance(value, dict) for value in rows))
+
+
 def project_evidence(row: Evidence) -> dict:
     """Build from field allowlists; never sanitize and forward an entire payload."""
     payload = row.payload if isinstance(row.payload, dict) else {}
@@ -260,6 +285,11 @@ def project_evidence(row: Evidence) -> dict:
             data['reason']='raw_text_not_authorized_for_external_model'
     elif row.source in ("mysql.lock_waits", "mysql.transactions", "mysql.sessions"):
         data["rows"] = [_numeric_fields(r, LOCK_FIELDS) | _structure_fields(r, alias) for r in raw_rows]
+        if _verified_requested_lock_attributes(row, payload):
+            for projected in data['rows']:
+                for name in ('LOCK_TYPE', 'LOCK_MODE', 'LOCK_STATUS'):
+                    if name in projected:
+                        projected['requested_' + name.lower()] = projected.pop(name)
     elif row.source == "mysql.statement_digest":
         data["rows"] = []
         units = payload.get("field_units") or {}

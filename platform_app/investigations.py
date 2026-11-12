@@ -42,7 +42,7 @@ from .report_summary import ExecutiveSummary
 from .scheduling import check_fence, complete, enqueue, fail
 from .tools import ToolBroker, project_evidence, tool_definitions, TOOL_SOURCES
 
-PROMPT_VERSION = "evidence-investigation-v4.2"
+PROMPT_VERSION = "evidence-investigation-v4.3"
 SAFE_COLLECTORS = frozenset(
     {
         "identity_status",
@@ -75,7 +75,7 @@ signal_calculation_columns对应inspection_signals.calculation数组，点号为
 2. 来源限定解释范围：data_lock_waits不等于metadata_locks。已明确来源为performance_schema.data_lock_waits的等待属于InnoDB数据锁，不可扩成元数据锁；缺LOCK_TYPE、锁对象等字段时只能说这些细节未知，不可越出来源去枚举类别。只有名称/key/tags而没有可信来源时，不可据其猜测底层表或语义。
 3. 聚合statement digest是按语句模式累计/窗口统计，不是具体事务或会话的执行记录。缺少session/transaction到digest的显式映射，不得将任一digest归属于特定阻塞/等待事务，也不得建议仅靠聚合digest定位其SQL或锁对象；先说明缺映射，所需映射须属于同对象、同冻结窗口并有引用。可以独立分析聚合SQL负载，但相关性不建立事务关联。所有建议仍限已授权冻结数据，缺少数据只列未知/后续人工观察前提，不能假装现有工具能取得未提供字段。
 phenomenon/joint_root_cause/conclusion必须是单个Claim对象，不能是字符串/数组/null；surface_causes为Claim数组，recommended_actions为Action数组，headline为字符串。示例仅说明形状，须重写内容并用实际ID替换<provided-reference>；不足时说明限制、数组可空，仍须包含全部顶层字段。
-已知MySQL来源边界：data_lock_waits本身提供等待/阻塞关系标识，不直接提供SQL文本或LOCK_TYPE/LOCK_MODE；LOCK_TYPE/LOCK_MODE来自data_locks关联，SQL文本需threads与events_statements关联（threads提供会话身份，events_statements_current/history提供可能保留的语句）。已有投影行的LOCK_TYPE/LOCK_MODE与schema_ref/table_ref等别名是可用结构证据，应实际解读，不要误说未提供；别名不泄露原对象名。缺字段时仅建议人工按关联表只读核对及说明采样/权限/历史保留前提，不可声称单读data_lock_waits即可取得全部字段，也不生成SQL或执行工具。当前语句不一定是持锁语句，没有历史映射仍不能归属具体SQL。
+已知MySQL来源边界：data_lock_waits本身提供等待/阻塞关系标识，不直接提供SQL文本或LOCK_TYPE/LOCK_MODE；LOCK_TYPE/LOCK_MODE来自data_locks关联，SQL文本需threads与events_statements关联（threads提供会话身份，events_statements_current/history提供可能保留的语句）。已有投影行的requested_lock_type/requested_lock_mode、未归属的LOCK_TYPE/LOCK_MODE与schema_ref/table_ref等别名是可用结构证据，应按角色实际解读，不要误说未提供；别名不泄露原对象名。缺字段时仅建议人工按关联表只读核对及说明采样/权限/历史保留前提，不可声称单读data_lock_waits即可取得全部字段，也不生成SQL或执行工具。当前语句不一定是持锁语句，没有历史映射仍不能归属具体SQL。
 有主机数值时必须按resource/host评估支持、反证或证据不足，在原因或结论引用代表数值，不逐条复述曲线。区分主机/实例和时间/缺口，正常样本不排除未采瞬时问题；注册关系/同时出现不证明因果。时刻必须显式UTC或Z，保留输入时区，不自行换算本地时区。
 snapshot_chronology是平台从本轮实际保留投影按时区归一生成的样本时间关系，不是诊断。各组隔离instance/source/template和已知host/item，缺身份不能猜合并。first_nonempty/last_nonempty仅非空锚点；empty_before_first/empty_after_last分别严格早于/晚于锚点，empty_at_nonempty_time不算前后，empty_between仅两个非空锚点之间；count只统计本轮保留样本，引用可能限额并有refs_omitted，groups_omitted/invalid_time_count代表缺口。empty_after_last.count=0明确表示未提供同组后续空样本，不能声称前后均空、恢复或瞬时；一个非空加全部更早空，无法确定持续时间，也不能推断当前仍等待。工具结果的时间关系仅覆盖该次结果。所有叙述须符合实际时间与组边界。
 surface_causes尽量说明各层可证实的直接机理及支持/反证，不要仅重复时间列表充作原因。RECORD等待链可解释为事务记录锁竞争的表层机制，但为什么长持锁、哪段SQL或业务起因仍需独立证据，不能从等待链臆断，也不能在未测时长时声称长持锁。
