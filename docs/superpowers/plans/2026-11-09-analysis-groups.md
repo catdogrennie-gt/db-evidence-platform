@@ -12,7 +12,7 @@
 
 ## Global constraints
 
-- No email, music, resume edits, public deployment or private-data publication.
+- No email, music, public deployment or private-data publication.
 - Official templates remain unmodified; diagnostic extensions are separate and identified.
 - Preserve existing history, original host mappings and frozen reports.
 - One source and one business system per group; exact item selection, explicit relations, max 32 items and 32 relations.

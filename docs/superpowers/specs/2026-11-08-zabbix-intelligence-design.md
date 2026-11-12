@@ -1,6 +1,6 @@
 # DB Evidence Platform: automatic inspection and visual reports
 
-Status: approved direction and interactive page skeleton, 2026-11-08. The user explicitly requested implementation, verification, documentation, GitHub publication, a historical release, and a truthful resume update. Deployment to an internet server is deferred by the user. This document records engineering decisions within that approval; it does not introduce another approval gate.
+Status: approved direction and interactive page skeleton, 2026-11-08. The user explicitly requested implementation, verification, documentation, GitHub publication, and a historical release. Deployment to an internet server is deferred by the user. This document records engineering decisions within that approval; it does not introduce another approval gate.
 
 ## Intent and product boundary
 
@@ -81,4 +81,4 @@ Frontend may accept additive optional fields; shared contract changes require co
 4. Verify frozen graph/curve values remain unchanged after upstream history changes; gaps remain null and old reports remain readable.
 5. Verify user-visible navigation, empty/error states, scope changes and report drill-down. Use actual screenshots and independently checked charts for documentation; never present the simulated skeleton as a running product.
 6. Before publishing, scan tracked content and screenshots for credentials, personal documents and private environment details. Preserve the exact previous public commit as a named historical release/tag; do not rewrite old commit history. README begins with the product and visible key screenshots, then workflow, features, quick start, architecture, evidence and limits; secondary details may fold.
-7. Update the user's resume privately using only demonstrated personal-project claims, real technology and measured evidence. Do not change unrelated employment dates or imply production adoption. Internet deployment is explicitly deferred.
+7. Keep project descriptions grounded in demonstrated implementation, real technology and measured evidence. Do not imply unverified production adoption. Internet deployment is explicitly deferred.

@@ -6,7 +6,7 @@
 
 个人 MySQL 运维实践：真实采集证据 → 模型选择受限只读工具 → 引用证据诊断 → 故障实验复核。
 
-这是一套可以运行的实验作品。数据为生成的 30,000 行订单和 2 行账户，未接入任何生产系统。邮件、简历、证书和 API 密钥均不在本仓库。
+这是一套可以运行的实验作品。数据为生成的 30,000 行订单和 2 行账户，未接入任何生产系统。私密资料、个人信息和 API 密钥均不在本仓库。
 
 ## 已实现
 
@@ -111,6 +111,6 @@ SHA256 在 Python 中对有序行和结构元数据计算，适用于此小数�
 
 ## 验收与展示
 
-见 [DEMO.md](DEMO.md) 的 10 分钟路线、[PORTFOLIO.md](PORTFOLIO.md) 的中英文简历段落和 [INTERVIEW.txt](INTERVIEW.txt) 的讲解稿。`reports/incident-verification.json` 保存完整案例、互斥与超时清理实测，`reports/browser-verification.json` 保存实际页面操作依据；`reports/diagnosis-verification.json` 保存早期两种主动诊断；`reports/control-verification.json` 保存反例与同输入对照；基础与恢复证据见 `reports/verification.json`。重复运行覆盖导出文件，SQLite 保留历史记录。
+见 [DEMO.md](DEMO.md) 的 10 分钟路线、[历史模块概览](docs/legacy-lab/project-summary.md) 与 [技术演示说明](docs/legacy-lab/technical-walkthrough.txt)。`reports/incident-verification.json` 保存完整案例、互斥与超时清理实测，`reports/browser-verification.json` 保存实际页面操作依据；`reports/diagnosis-verification.json` 保存早期两种主动诊断；`reports/control-verification.json` 保存反例与同输入对照；基础与恢复证据见 `reports/verification.json`。重复运行覆盖导出文件，SQLite 保留历史记录。
 
 ![主动诊断、工具审计与历史证据](reports/screenshots/diagnosis.jpg)

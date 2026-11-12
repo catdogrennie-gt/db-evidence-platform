@@ -1,4 +1,6 @@
-# 验收与面试演示（约 10 分钟）
+# 历史实验模块验收指南（约 10 分钟）
+
+本页记录固定实例实验阶段的操作。当前平台入口、架构与使用方式见 [README](README.md) 和 [操作手册](docs/operator-manual.md)。
 
 1. 打开 http://127.0.0.1:8765 ，确认最近 90 秒内的采集时间、六类证据来源和 Questions/s 的实际采样窗口。说明这些是实验实例数据，监控查询也计入计数；“采集正常”不等于业务没有问题。
 2. 进入“实验记录”，点“运行索引诊断完整案例”，阅读页面范围确认后执行。观察阶段进度；故障保持期间模型读取 describe_table 与 explain_order_lookup。完成卡片中应显示 ALL → ref、lab_customer_idx、诊断 complete、故障工具证据已确认、清理 passed。通常约一分钟，实际取决于模型和 SSH，不是时延承诺。
@@ -24,7 +26,7 @@ cd D:\Codex_WS\TDX_DBA\db-evidence-lab
 
 诊断验证会真实调用付费模型、删除/恢复实验索引和注入事务等待。模型调用有不确定性：失败时保留 SQLite 记录与 runtime/diagnosis-check-progress.json，先检查错误，不修改导出文件伪造通过。新导出覆盖旧文件，历史 SQLite 记录保留。
 
-页面可选择近期报告；任意历史记录用 /api/record/<ID> 追溯。截图位于 reports/screenshots/，所有数据库内容为合成数据。
+页面可选择近期报告；任意历史记录可通过 /api/record/<ID> 追溯。截图位于 reports/screenshots/，所有数据库内容为合成数据。
 
 ## 讲解重点
 
@@ -34,8 +36,8 @@ cd D:\Codex_WS\TDX_DBA\db-evidence-lab
 - 旧采集模板从累计 SQL 摘要中单列且保留；新采集连接没有业务默认库。模板匹配不是账号归因。TRX_WAIT_STARTED 与 TRX_STARTED 分开，数据库时钟不能直接和宿主 UTC 混算；SUM_LOCK_TIME 是表锁等待统计，不能据此计算 InnoDB 行锁等待占比。
 - 这是个人实践原型，缺少多用户认证、任务取消、生产调度、完整监控适配和大规模数据校验。
 
-## 后续共同核对
+## 复验要求
 
-确认简历实际任职/项目日期，尤其已有简历中的未来结束日期；当前不自动改写经历。源码仅在本地 Git，发布与邮件发送由用户另行决定。
+复验前确认实验目标、配置与报告版本，按顺序运行检查并保留失败记录。实验环境的数据与操作边界不能直接外推到生产环境。
 
 HTTP验收：可另运行 .\.venv\Scripts\python.exe verify_api.py（服务需先启动，会真实演练索引并调用模型）。报告见reports/api-verification.json。11月8日上午已通过浏览器实际点击验证页面确认、取消、单独索引实验、两个完整案例及报告跳转，见 reports/browser-verification.json 与截图。此前浏览器输入受阻的记录保留为迭代历史。

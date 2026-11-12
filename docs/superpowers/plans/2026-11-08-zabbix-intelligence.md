@@ -14,7 +14,7 @@
 
 ## Global Constraints
 
-- Never send email. Secrets, original emails, resumes and private exports never enter tracked/public artifacts.
+- Never send email. Secrets, private materials and private exports never enter tracked/public artifacts.
 - Old events, investigations, frozen reports, direct MySQL onboarding and explicit backend authorization remain compatible.
 - Source host identity is not a MySQL UUID. No invented MetricFrame clocks or false monitoring capabilities.
 - Missing samples remain null/unknown. Frozen reports do not silently update from live history.
@@ -82,12 +82,12 @@ Checked items record completed implementation or bounded verification in the sta
 - [ ] Exercise lab lock/SQL scenarios with bounded cleanup and real model calls under existing consent/budget. Verify findings against source evidence, freezing, restart, scope denial and failure behavior.
 - [ ] Capture actual screenshots and reports. Run final regression/typecheck/build and independent review, then fix material findings with reproducible tests.
 
-## Task 6: Public delivery and private resume
+## Task 6: Public delivery and documentation
 
-**Files:** README.md, CHANGELOG.md, docs/releases/*, docs/user-guide.md, docs/architecture.md, verified screenshots; private updated resume and project interview notes.
+**Files:** README.md, CHANGELOG.md, docs/releases/*, docs/user-guide.md, docs/architecture.md, verified screenshots; private verification notes remain outside tracked artifacts.
 
 - [x] Preserve exact previous public source commit with historical tag/release and release notes. Use available authenticated GitHub tools; if a tool lacks a release operation, pursue the supported UI/CLI path without stopping independent development.
 - [ ] Follow official GitHub README guidance and suitable open-source product layouts. Show primary product/report screenshots directly before technical detail; fold only secondary evidence or verbose instructions.
 - [ ] Write install, operations, source capability, model limitations, acceptance, demonstration and version migration docs based on actual verification. Check links and secret scans.
-- [x] Create a private resume revision preserving unrelated content and honest personal-project wording; render/inspect before delivery.
+- [x] Review private project materials for factual accuracy; retain unrelated private content outside tracked/public artifacts.
 - [ ] Publish verified current source and documentation to the original public repository without overwriting concurrent user commits. Fetch/read back the published commit and key images. Defer cloud/tunnel deployment.

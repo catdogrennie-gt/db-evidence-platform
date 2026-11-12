@@ -65,7 +65,6 @@
 | --- | --- |
 | [GitHub：About READMEs](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes) | 先回答用途、价值及如何开始，使用仓库内相对文档 / 图片链接 |
 | [GitHub：Collapsed sections](https://docs.github.com/en/get-started/writing-on-github/working-with-advanced-formatting/organizing-information-with-collapsed-sections) | 把并非每位读者都需要的细节折叠；核心图直显是本次产品展示要求 |
-| [GitHub：项目展示与简历](https://docs.github.com/en/account-and-profile/tutorials/using-your-github-profile-to-enhance-your-resume) | 展示核心功能、设置 / 运行、示例和测试，让招聘者能快速探索 |
 | [Bytebase README](https://github.com/bytebase/bytebase/blob/main/README.md) | 顶部导航和图形之后解释产品定位，再展开功能与使用方式 |
 | [DBeaver README](https://github.com/dbeaver/dbeaver/blob/devel/README.md) | 核心产品图直接显示，下载 / 运行 / 文档 / 架构各有入口 |
 | [Grafana README](https://github.com/grafana/grafana/blob/main/README.md) | 简短能力说明与开始使用入口，深度文档链接出去 |

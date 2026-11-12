@@ -2,7 +2,7 @@
 
 | 版本 | 状态 | 入口 |
 | --- | --- | --- |
-| 当前源码：公开演示 | 固定 Lab 开关、共享限制和恢复复验；发布与真实运行情况见验收 | [演示指南](../demo-guide.md)、[本轮验收](../acceptance-public-demo.md)、[变更记录](../../CHANGELOG.md) |
+| 当前源码：公开演示 | Zabbix 数据聚合、持续检查与 AI 分析；独立多场景实验系统验证真实链路 | [操作手册](../operator-manual.md)、[场景验证](../validation-scenarios.md)、[变更记录](../../CHANGELOG.md) |
 | `conclusion-first-2026.11.09` | 已发布 Release；实际回归与模型语义结果以验收记录为准 | [GitHub Release](https://github.com/catdogrennie-gt/db-evidence-platform/releases/tag/conclusion-first-2026.11.09)、[该轮验收](../acceptance-conclusion-first.md)、[结论阅读指南](../conclusion-first-guide.md) |
 | `analysis-groups-2026.11.09` | 历史 Release 已发布；联合分析对象与类型化数据读取的上一轮版本 | [GitHub Release](https://github.com/catdogrennie-gt/db-evidence-platform/releases/tag/analysis-groups-2026.11.09)、[固定源码](https://github.com/catdogrennie-gt/db-evidence-platform/tree/4a8af179a1d8c8ea6198361edcde06181724e188)、[该轮验收](../acceptance-analysis-groups.md) |
 | `legacy-platform-2026.11.08` | 历史 Release 已发布，非草稿 / 非预发布，未设为最新版本 | [GitHub Release](https://github.com/catdogrennie-gt/db-evidence-platform/releases/tag/legacy-platform-2026.11.08)、[历史能力、边界与回溯](legacy-platform-2026.11.08.md) |

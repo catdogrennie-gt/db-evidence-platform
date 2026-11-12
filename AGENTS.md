@@ -11,7 +11,7 @@ Read the parent workspace instructions. Follow the user's current instructions i
 - Keep identities stable. UUID changes quarantine an old asset; a genuinely new UUID creates a new asset and new history. P0 has one owning system and one effective endpoint per instance.
 - Keep raw alert episodes, event transitions, human execution records, verification manifests, and reviewed knowledge distinct. P0 event merging is limited to one instance. All included episodes must have fresh recovery evidence before verified event recovery.
 - Use the independent control database and Prometheus specified by the design. Do not label SQLite JSON history as the platform TSDB or claim optional Grafana/exporter integration without evidence.
-- Source emails, resumes, certificates, API keys, passwords, master keys, connection files, and private exports remain outside tracked files. Never send email or publish externally without the user's explicit instruction.
+- Private source materials, personal information, API keys, passwords, master keys, connection files, and private exports remain outside tracked files. Never send email or publish externally without the user's explicit instruction.
 - Keep the old lab's operator and recovery credentials isolated from general onboarding. Only explicitly registered lab assets may use controlled experiments.
 - Track implementation status against FR/AT identifiers. Preserve failures and distinguish implemented-and-verified, implemented-awaiting-verification, unimplemented, and externally-unverifiable.
 - Run relevant fresh checks before completion claims and commits. Record reproducible commands and the next action in the parent workspace `CHECKPOINT.txt` during extended work.

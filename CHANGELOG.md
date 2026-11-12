@@ -59,7 +59,6 @@
 - 增加[README 结构与素材约定](docs/readme-guidelines.md)，核心产品图直接展示，实际 UI、设计图和离线证据图分别标识。
 - 发布[历史版本](https://github.com/catdogrennie-gt/db-evidence-platform/releases/tag/legacy-platform-2026.11.08)，保留精确公开源码身份；同步[回溯说明](docs/releases/legacy-platform-2026.11.08.md)与[版本索引](docs/releases/README.md)。
 - 重写 README，以结果入口、三层证据、自动巡检、Zabbix 接入与业务授权为主线，核心产品图直接展示。
-- 私密简历已完成三页正式版并逐页复查，不进入公共源码；保留原履历并补充个人项目，公网部署延后。
 
 ## legacy-platform-2026.11.08 — 历史 Release
 
