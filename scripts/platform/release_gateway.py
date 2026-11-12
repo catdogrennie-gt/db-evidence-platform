@@ -205,6 +205,8 @@ def _retain(spec, other):
 
 def build_config(spec):
     """Build native Caddy JSON. HTTP API and SPA routes remain separate."""
+    if type(spec.get("public_read_only", False)) is not bool:
+        raise ReleaseError("public_read_only_boolean_required")
     listen, admin = _address(spec["listen"]), _address(spec["admin"])
     origin = _origin(spec["target"]["origin"])
     if len({listen, admin, origin[7:]}) != 3:
@@ -246,6 +248,11 @@ def build_config(spec):
         routes.append({"handle": [{"handler": "rewrite", "uri": "/index.html"}, static]})
     else:
         routes.append({"handle": [{"handler": "reverse_proxy", "upstreams": [{"dial": origin[7:]}]}]})
+    if spec.get("public_read_only", False):
+        routes.insert(1 if spec.get("frontend") else 0, {
+            "match": [{"not": [{"method": ["GET", "HEAD", "OPTIONS"]}]}],
+            "handle": [{"handler": "static_response", "status_code": 403}], "terminal": True,
+        })
     return {"admin": {"listen": admin, "config": {"persist": False}}, "apps": {"http": {"servers": {"edge": {
         "listen": [listen], "protocols": ["h1"], "automatic_https": {"disable": True}, "routes": routes}}}}}
 

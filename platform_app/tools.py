@@ -8,6 +8,7 @@ import math
 import re
 import json
 from collections import Counter
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy import func, select
@@ -126,7 +127,8 @@ def tool_definitions(names=None):
         'instance_id':{'type':'string'},'from':{'type':'string'},'to':{'type':'string'},
         'limit':{'type':'integer','minimum':1,'maximum':100},
         'evidence_ids':{'type':'array','items':{'type':'string'},'maxItems':100},
-        'manifest_item_ids':{'type':'array','items':{'type':'string'},'maxItems':32},
+        'manifest_item_ids':{'type':'array','items':{'type':'string'},'maxItems':32,
+            'description':'Exact metric evidence_id (manifest:UUID); legacy bare UUID also accepted.'},
     }}
     return [
         {
@@ -527,7 +529,17 @@ class ToolBroker:
                     else []
                 )
                 if args.manifest_item_ids is not None:
-                    wanted=set(args.manifest_item_ids)
+                    wanted=set()
+                    for reference in args.manifest_item_ids:
+                        if reference.startswith('manifest:'):
+                            identifier=reference[len('manifest:'):]
+                            try:
+                                if str(UUID(identifier))!=identifier:raise ValueError
+                            except ValueError:
+                                raise PlatformError(404,'resource_not_found','冻结指标引用不属于本调查对象。') from None
+                            wanted.add(identifier)
+                        else:
+                            wanted.add(reference)
                     frozen=[row for row in frozen if row.id in wanted]
                     if wanted!={row.id for row in frozen}: raise PlatformError(404,'resource_not_found','冻结指标引用不属于本调查对象。')
                 query = select(MetricFrame).where(

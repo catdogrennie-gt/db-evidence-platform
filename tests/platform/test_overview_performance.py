@@ -217,4 +217,5 @@ def test_overview_model_registration_time_is_not_a_new_target_observation(ai_env
     [issue]=overview(e['actor'])['issues']
     assert issue['report_freshness']['status']=='current'
     assert issue['finding_status']=='hypothesis'
-    assert 'Candidate mechanism only' in issue['summary']
+    assert issue['presentation_kind']=='history' and '未被本次报告复核' in issue['summary']
+    assert 'Candidate mechanism only' not in issue['summary']

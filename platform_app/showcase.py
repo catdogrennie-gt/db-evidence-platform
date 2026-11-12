@@ -348,7 +348,8 @@ def numeric_snapshot(db,config):
     selected={(str(i.get('hostid')),str(i.get('itemid'))) for i in mapping.items if i.get('value_kind')=='numeric'}
     now=db_now(db); metrics=[]; seen=set(); live_charts=[]
     selected_items={(str(i.get('hostid')),str(i.get('itemid'))):i for i in mapping.items}
-    for row in latest_numeric_evidence(db,instance.id,mapping.source_id,selected):
+    numeric_candidates=list(latest_numeric_evidence(db,instance.id,mapping.source_id,selected))
+    for row in numeric_candidates:
         payload=row.payload or {}; meta=payload.get('item') or {}; coverage=row.coverage or {}
         identity=(str(meta.get('hostid')),str(meta.get('itemid')))
         if identity not in selected or identity in seen: continue
@@ -380,8 +381,14 @@ def numeric_snapshot(db,config):
         return (provenance.get('source_id')==mapping.source_id
                 and provenance.get('mapping_version')==mapping.version
                 and provenance.get('config_revision')==instance.config_revision)
+    capacity_facts={}
     def current_signal(finding):
         calculation=finding.calculation or {}
+        if finding.category=='capacity_pressure':
+            from .capacity_signals import current_capacity_fact
+            fact=current_capacity_fact(db,finding,mapping,instance,now,candidates=numeric_candidates)
+            if fact is not None:capacity_facts[finding.id]=fact
+            return fact is not None
         if calculation.get('observation_state') in ('recovered','returned_to_baseline'): return False
         if finding.category=='baseline_change':
             identity=(str(calculation.get('hostid')),str(calculation.get('itemid')))
@@ -418,6 +425,20 @@ def numeric_snapshot(db,config):
             return True
         return False
     active=[f for f in findings if current_signal(f)]
+    from types import SimpleNamespace
+    from .intelligence import _finding_presentation
+    rule_findings=[]
+    for finding in active:
+        fact=capacity_facts.get(finding.id)
+        if fact is None or len(rule_findings)>=6:continue
+        # Present this read's checked operands without mutating the saved rule,
+        # event, model report, or any frozen observation window.
+        event=db.get(m.Event,finding.event_id)
+        view=SimpleNamespace(category=finding.category,calculation=fact['calculation'])
+        presentation=_finding_presentation(event,view,instance,mapping,None)
+        rule_findings.append({'title':presentation['title'],'summary':presentation['summary'],
+            'observed_at':fact['calculation']['observed_at'],
+            'evidence_ids':fact['evidence_ids'],'status':'active'})
     signals=[{'id':f.id,'category':f.category,'kind':f.kind,'classification':(f.calculation or {}).get('classification','observed_change'),
               'observed_at':(f.calculation or {}).get('observed_at'),
               'episode_started_at':(f.calculation or {}).get('episode_started_at'),
@@ -472,7 +493,7 @@ def numeric_snapshot(db,config):
         'gaps':[] if bool(selected) and len(fresh)==len(selected) else ['selected_samples_missing_or_stale']}
     pacing=pacing_projection(db,instance,policy,schedule,now)
     return {'enabled':True,'server_time':iso(now),'target':{'instance_id':instance.id,'name':safe_text(instance.name),'key':cfg.get('key')},
-        'pacing':pacing,'observation':observation,
+        'pacing':pacing,'observation':observation,'rule_findings':rule_findings,
         'inspection':inspection_projection(db,{instance.id},policy=policy,now=now,
             collection_context=(instance,mapping,schedule,pacing)),'report':report,
         'report_matches_current_observation':matches,'charts':charts,'live_charts':live_charts}

@@ -387,11 +387,12 @@ test('a changed business scope clears stale object selections but changing time 
   assert.deepEqual(selectionForScope(old, same, ['object-a']), ['object-a']);
   assert.deepEqual(selectionForScope(old, changed, ['object-a']), []);
 });
-test('only the root without an explicit time selection starts in live rolling mode',()=>{
+test('automatic refresh starts off for a new session regardless of route or query',()=>{
   assert.equal(typeof intelligenceModel.initialRollingWindow, 'function');
   const initialRollingWindow = intelligenceModel.initialRollingWindow;
-  assert.equal(initialRollingWindow('/', ''),true);
-  assert.equal(initialRollingWindow('/', '?instance_id=lab'),true);
+  assert.equal(initialRollingWindow('/', ''),false);
+  assert.equal(initialRollingWindow('/', '?instance_id=lab'),false);
+  assert.equal(initialRollingWindow('/', '?auto_refresh=true'),false);
   for(const path of ['/metrics','/issues/id','/investigations/id']) assert.equal(initialRollingWindow(path,''),false);
   for(const search of ['?from=2026-11-09T00:00:00Z','?to=2026-11-09T01:00:00Z','?from=a&to=b','?from=&to=']) assert.equal(initialRollingWindow('/',search),false);
 });

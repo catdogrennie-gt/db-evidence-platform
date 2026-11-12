@@ -36,6 +36,20 @@ test('summary precedes optional folded graph and curves', () => {
   assert.ok(html.indexOf('请求变慢') < html.indexOf('证据关系'));
   assert.match(html, /<details[^>]*><summary>证据关系/); assert.doesNotMatch(html, /<details[^>]*open/);
 });
+
+test('actual problem observations remain visible before a model interpretation and keep their own time', () => {
+  const data={...base,title:'数据库连接容量余量不足',summary:'实际用量 34 / 40，占用85%，剩余6；已超过80%关注水位。',
+    kind:'risk',presentation_kind:'issue',finding_status:'observed',
+    report_freshness:{status:'outdated',event_updated_at:'2026-11-12T15:26:13Z'}};
+  const html=render(ui.ReportEvidence,{data});
+  assert.match(html,/已检测的风险/);
+  assert.ok(html.indexOf(data.summary)<html.indexOf('请求变慢'));
+  assert.match(html,/2026-11-12T15:26:13Z/);
+  assert.match(html,/当前只能确认观测重叠/,'keep the actual model report unchanged');
+  const recovered=render(ui.ReportEvidence,{data:{...data,presentation_kind:'history',observation_state:'recovered',summary:'后续实际观测已恢复'}});
+  assert.match(recovered,/后续观测/);
+  assert.doesNotMatch(recovered,/已检测的风险/);
+});
 test('failed and pending reports label retained output as historical', () => {
   assert.equal(typeof ui.ReportEvidence, 'function');
   for (const status of ['failed', 'analyzing']) assert.match(render(ui.ReportEvidence, { data: { ...base, status } }), /保留的历史输出/);
@@ -102,8 +116,8 @@ test('first-view summary exposes the three questions and every action before fol
   const split = html.indexOf('<details class="executive-details"');
   assert.ok(split > 0, 'full evidence belongs in a default-closed summary disclosure');
   const firstView = html.slice(0, split), detail = html.slice(split);
-  for (const value of ['发生了什么', '为什么', '现在怎么做', summary.conclusion.statement, summary.phenomenon.statement, ...summary.surface_causes.map(c => c.statement), ...actions.map(a => a.description), '证据不足', '高风险', '需要人工批准']) assert.ok(firstView.includes(value), value);
-  for (const value of ['反证引用', '尚缺并发对照', '确认负载', '复查等待', summary.joint_root_cause.statement]) {
+  for (const value of ['发生了什么', '为什么', '现在怎么做', summary.conclusion.statement, summary.phenomenon.statement, summary.joint_root_cause.statement, ...summary.surface_causes.map(c => c.statement), ...actions.map(a => a.description), '证据不足', '高风险', '需要人工批准']) assert.ok(firstView.includes(value), value);
+  for (const value of ['反证引用', '尚缺并发对照', '确认负载', '复查等待']) {
     assert.ok(!firstView.includes(value), 'technical detail must not push actions below the fold: ' + value);
     assert.ok(detail.includes(value), 'full detail must remain available: ' + value);
   }
@@ -113,9 +127,44 @@ test('first-view summary exposes the three questions and every action before fol
   assert.match(firstView, /class="executive-questions"/);
 });
 
+test('unreviewed changes and normal inspection records stay outside the open problem lists', () => {
+  assert.equal(typeof ui.IssueOverviewSections, 'function');
+  const issue = { id, title: '连接余量不足', summary: '当前连接占用偏高', kind: 'current', presentation_kind: 'issue', object_names: ['订单数据库'], instance_ids: [id], status: 'open', severity: 'warning' };
+  const signal = { ...issue, id: 'signal', title: '查询耗时下降', presentation_kind: 'signal' };
+  const historical = { ...issue, id: 'history', title: '过去的连接变化', presentation_kind: 'history', observation_state: 'returned_to_baseline' };
+  const html = render(ui.IssueOverviewSections, { issues: [issue, signal, historical], inspected: true });
+  const firstDisclosure = html.indexOf('<details');
+  assert.ok(firstDisclosure > 0);
+  assert.match(html.slice(0, firstDisclosure), /连接余量不足/);
+  assert.doesNotMatch(html.slice(0, firstDisclosure), /查询耗时下降|过去的连接变化/);
+  assert.match(html, /变化线索/);
+  assert.match(html, /查看变化线索/);
+  assert.doesNotMatch(html, /<details[^>]*\bopen/);
+  const oldHypothesis = render(ui.IssueOverviewSections, { issues: [{ ...historical, observation_state: undefined, finding_status: 'hypothesis' }], inspected: true });
+  assert.match(oldHypothesis, /历史候选解释 · 待复核/);
+  const normal = render(ui.RecentAnalyses, { reports: [{ id, status: 'completed', mode: 'live_redacted', report: { executive_summary: { ...summary, headline: '本窗口未发现明确异常' } } }] });
+  assert.match(normal, /^<details[^>]*><summary>巡检记录/);
+  assert.doesNotMatch(normal, /<details[^>]*\bopen/);
+  assert.match(normal, /本窗口未发现明确异常/);
+});
+
 test('the full platform has no fault-control route or navigation', () => {
   assert.equal(app.menuDefinitions.some(x => x.key === '/demo'), false);
   assert.doesNotMatch(readFileSync('src/App.tsx', 'utf8'), /<Demo|path="\/demo"/);
+});
+
+test('recent recovered rule problems stay visible without inflating current problems', () => {
+  const recovered={id,title:'存在数据库锁等待',summary:'后续观测已恢复',kind:'current',
+    presentation_kind:'history',observation_state:'recovered',finding_status:'observed',
+    object_names:['测试数据库'],instance_ids:[id],status:'open',severity:'warning'};
+  const change={...recovered,id:'change',title:'查询耗时回到基线',observation_state:'returned_to_baseline'};
+  const hypothesis={...recovered,id:'hypothesis',title:'当时的候选解释',finding_status:'hypothesis'};
+  const html=render(ui.IssueOverviewSections,{issues:[recovered,change,hypothesis],inspected:true});
+  const visible=html.slice(0,html.indexOf('<details'));
+  assert.match(visible,/最近已恢复的问题/);
+  assert.match(visible,/存在数据库锁等待/);
+  assert.doesNotMatch(visible,/查询耗时回到基线|当时的候选解释/);
+  assert.match(html,/历史观测 · 2 项/);
 });
 test('unfinished historical reports without summaries do not claim to be legacy reports', () => {
   for (const status of ['failed', 'queued', 'analyzing']) {

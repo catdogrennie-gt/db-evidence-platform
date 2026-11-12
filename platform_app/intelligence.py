@@ -19,8 +19,10 @@ from .scheduling import db_now, task_ref
 
 POLICY_FIELDS = ['id','version','enabled','instance_ids','signal_interval_seconds','ai_interval_seconds','urgent_enabled','cooldown_seconds','max_daily_runs','mode','external_confirmed','next_signal_at','next_ai_at','last_dispatched_at','last_completed_at','status','reason']
 LABELS = {'lock_wait': '存在数据库锁等待', 'sql_latency': 'SQL 窗口平均耗时偏高', 'cpu_pressure': '主机 CPU 持续压力', 'probe_unavailable': '数据库探测不可用', 'cpu_trend': 'CPU 增长趋势的条件性容量风险', 'baseline_change': '监控项出现持续基线变化，待关联分析', 'evidence_correlation': '待核验：AI 证据关联假设'}
+LABELS['capacity_pressure'] = '资源容量余量不足'
 RULE_CATEGORY = {'locks_present': 'lock_wait', 'sql_latency': 'sql_latency'}
 TERMINAL_EVENTS = ('resolved','closed','merged')
+HISTORICAL_OBSERVATIONS = frozenset(('returned_to_baseline','recovered','configuration_changed','historical_candidate'))
 
 
 def current_policy(actor):
@@ -202,6 +204,8 @@ def scan_signals(db, policy, now):
                 if not risk: continue
                 evidence=db.scalar(select(m.Evidence).where(m.Evidence.instance_id==identifier,m.Evidence.source=="linux.host",m.Evidence.observed_at>=now-timedelta(minutes=5)).order_by(m.Evidence.observed_at.desc()).limit(1))
                 if evidence: findings.append(upsert_finding(db,identifier,"cpu_trend","instance",[evidence.id],risk,kind="risk",now=now))
+    from .capacity_signals import scan_group_capacity
+    findings.extend(scan_group_capacity(db,policy,now))
     from .health_signals import scan_group_changes
     findings.extend(scan_group_changes(db,policy,now))
     return list({f.id:f for f in findings}.values())
@@ -263,9 +267,11 @@ def sync_model_findings(db, dispatch, investigation):
         if not local or not finding_dimension_supported(db,proposal,local): continue
         # A model explanation of an already observed problem belongs to its
         # original Event. Keep the deterministic category, state and facts.
-        observed=_matching_observed_finding(db,proposal)
+        observed=_matching_observed_finding(db,proposal,local)
         if observed:
             link_report(db,observed,investigation)
+            if observed.category=='baseline_change':
+                _record_finding_review(db,observed,investigation,proposal,task)
             continue
         dimension=('metric:'+proposal.dimension.value if proposal.dimension.kind=='metric' else
                    'sql:'+proposal.dimension.value.lower() if proposal.category=='sql' else proposal.category+':instance')
@@ -277,17 +283,33 @@ def sync_model_findings(db, dispatch, investigation):
             # the latest pointer; late completion is historical context only.
             link_report(db,existing,investigation)
             continue
-        calculation={'classification':'model_hypothesis','family':proposal.category,'dimension':proposal.dimension.model_dump(),'statement':proposal.statement}
+        calculation={'classification':'model_hypothesis','family':proposal.category,'dimension':proposal.dimension.model_dump(),
+                     'statement':proposal.statement,'assessment_investigation_id':investigation.id}
         finding=upsert_finding(db,identifier,'evidence_correlation',dimension,refs,calculation,kind='risk',now=investigation.updated_at)
         if finding.latest_investigation_id != investigation.id: link_report(db,finding,investigation)
 
 
-def _matching_observed_finding(db,proposal):
+def _matching_observed_finding(db,proposal,items=()):
     candidates=db.scalars(select(m.InspectionFinding).join(m.Event,m.Event.id==m.InspectionFinding.event_id).where(m.InspectionFinding.instance_id==proposal.instance_id,m.InspectionFinding.category!='evidence_correlation',m.Event.status.notin_(TERMINAL_EVENTS)).order_by(m.InspectionFinding.updated_at.desc()).with_for_update())
     expected=proposal.dimension.value.lower() if proposal.dimension.kind=='sql_digest' else 'instance'
-    for finding in candidates:
+    # A capacity rule and its numerator's baseline change may coexist. Attach
+    # a two-operand model explanation to the rule before considering changes.
+    for finding in sorted(candidates,key=lambda row:row.category!='capacity_pressure'):
+        if finding.category=='capacity_pressure' and proposal.category=='correlation':
+            calc=finding.calculation or {}
+            metric_ids={str(calc.get('used_itemid')),str(calc.get('limit_itemid'))}
+            # Keep one deterministic issue identity; require both operands from
+            # this exact host/source in the model's cited frozen evidence.
+            supported=set()
+            for item in items:
+                for metric_id in metric_ids:
+                    if _reference_matches_signal(db,item,finding,itemid=metric_id):supported.add(metric_id)
+            if (supported==metric_ids and (proposal.dimension.kind=='instance'
+                    or proposal.dimension.kind=='metric' and proposal.dimension.value in metric_ids)):
+                return finding
         if proposal.dimension.kind=='metric':
-            if finding.category=='baseline_change' and str((finding.calculation or {}).get('itemid'))==proposal.dimension.value:
+            if (finding.category=='baseline_change' and str((finding.calculation or {}).get('itemid'))==proposal.dimension.value
+                    and any(_reference_matches_signal(db,item,finding) for item in items)):
                 return finding
             continue
         if _issue_category(finding)!=proposal.category: continue
@@ -295,6 +317,43 @@ def _matching_observed_finding(db,proposal):
         if proposal.dimension.kind=='sql_digest' and dimension.startswith('sql:'): dimension=dimension[4:]
         if dimension==expected: return finding
     return None
+
+
+def _reference_matches_signal(db,item,finding,*,itemid=None):
+    """A same-number item on another host/source is not this observed signal."""
+    calc=finding.calculation or {}
+    if itemid is not None:calc={**calc,'itemid':itemid}
+    if item.evidence_id:
+        evidence=db.get(m.Evidence,item.evidence_id)
+        if not evidence:return False
+        meta=(evidence.payload or {}).get('item') or {};provenance=evidence.coverage or {}
+    else:
+        payload=item.payload or {};meta=payload.get('item') or {};provenance=payload.get('provenance') or {}
+    return all(calc.get(key) is not None and str(calc[key])==str(value)
+               for key,value in (('source_id',provenance.get('source_id')),('hostid',meta.get('hostid')),('itemid',meta.get('itemid'))))
+
+
+def _record_finding_review(db,finding,investigation,proposal,task):
+    if (finding.latest_investigation_id!=investigation.id or investigation.status not in ('completed','partial')
+            or not finding.signal_hash):return
+    current=finding.calculation or {};frozen_hash=None
+    for signal in (task.payload or {}).get('options',{}).get('inspection',{}).get('signals',[]):
+        calc=signal.get('calculation') or {}
+        if (signal.get('instance_id')!=finding.instance_id or signal.get('category')!='baseline_change'
+                or any(calc.get(k)!=current.get(k) for k in ('source_id','hostid','itemid','mapping_version','config_revision'))):continue
+        frozen_hash=signal.get('signal_hash')
+        if not frozen_hash and calc.get('episode_started_at'):
+            frozen_hash=digest([finding.instance_id,'baseline_change',finding.dimension,calc['episode_started_at']])
+        if frozen_hash==finding.signal_hash:break
+    if frozen_hash!=finding.signal_hash:return
+    duplicate=db.scalar(select(m.EventTransition.id).where(m.EventTransition.event_id==finding.event_id,
+        m.EventTransition.action=='inspection_finding_review',
+        m.EventTransition.details['investigation_id'].as_string()==investigation.id,
+        m.EventTransition.details['signal_hash'].as_string()==finding.signal_hash).limit(1))
+    if not duplicate:
+        db.add(m.EventTransition(event_id=finding.event_id,action='inspection_finding_review',
+            details={'investigation_id':investigation.id,'signal_hash':finding.signal_hash,
+                     'statement':proposal.statement,'evidence_ids':list(proposal.evidence_ids)}))
 
 
 def finding_dimension_supported(db, proposal, items):
@@ -437,7 +496,7 @@ def dispatch_due(factory, *, policy_id=None, force=False):
                 # Nested transaction preserves a visible blocked state on queue limits.
                 try:
                     with db.begin_nested():
-                        inv, task = create_investigation(actor,identifiers,now-timedelta(hours=1),now,'自动综合巡检：关联应用、数据库、主机和网络的实际证据；先说明发生什么、影响和建议操作，再比较异常与基线，列出反证和未知。区分应用侧与数据库侧原因，不能把相关性当成已证实根因。',mode=policy.mode,event_id=event_id,idempotency_key=key,options={'external_confirmed':policy.external_confirmed,'max_tool_calls':6,'inspection':{'policy_id':policy.id,'version':policy.version,'signals':[{'category':f.category,'kind':f.kind,'instance_id':f.instance_id,'evidence_ids':f.evidence_ids,'calculation':f.calculation} for f in findings if f.instance_id in identifiers]}})
+                        inv, task = create_investigation(actor,identifiers,now-timedelta(hours=1),now,'自动综合巡检：关联应用、数据库、主机和网络的实际证据；先说明发生什么、影响和建议操作，再比较异常与基线，列出反证和未知。区分应用侧与数据库侧原因，不能把相关性当成已证实根因。',mode=policy.mode,event_id=event_id,idempotency_key=key,options={'external_confirmed':policy.external_confirmed,'max_tool_calls':6,'inspection':{'policy_id':policy.id,'version':policy.version,'signals':[{'category':f.category,'kind':f.kind,'instance_id':f.instance_id,'signal_hash':f.signal_hash,'evidence_ids':f.evidence_ids,'calculation':f.calculation} for f in findings if f.instance_id in identifiers]}})
                         db.add(m.InspectionDispatch(policy_id=policy.id,policy_version=policy.version,dispatch_key=key,trigger=trigger,event_id=event_id,instance_ids=identifiers,investigation_id=inv.id,task_id=task.id))
                         for f in findings:
                             if f.instance_id in identifiers:
@@ -468,7 +527,7 @@ def _issue_category(finding):
     if finding.category=='evidence_correlation':
         family=(finding.calculation or {}).get('family')
         return family if family in ('locks','sql','host','network','correlation') else 'correlation'
-    return {'lock_wait':'locks','sql_latency':'sql','cpu_pressure':'host','cpu_trend':'host','probe_unavailable':'network','baseline_change':'correlation'}.get(finding.category,'unknown')
+    return {'lock_wait':'locks','sql_latency':'sql','cpu_pressure':'host','cpu_trend':'host','probe_unavailable':'network','baseline_change':'correlation','capacity_pressure':'correlation'}.get(finding.category,'unknown')
 
 
 def _evidence_category(source):
@@ -516,6 +575,105 @@ def _related_report_fact(db,inv,finding):
     return None
 
 
+def _finding_reviews(db,rows,reports):
+    """One small ledger query, restricted to already-authorized selected reports."""
+    candidates={event.id:(finding,reports.get(event.id)) for event,finding in rows
+                if finding and finding.category=='baseline_change' and finding.signal_hash
+                and reports.get(event.id) and reports[event.id].status in ('completed','partial')
+                and finding.latest_investigation_id==reports[event.id].id}
+    if not candidates:return {}
+    result={}
+    query=select(m.EventTransition.event_id,m.EventTransition.details).where(
+        m.EventTransition.action=='inspection_finding_review',m.EventTransition.event_id.in_(candidates),
+        m.EventTransition.details['investigation_id'].as_string().in_({inv.id for _,inv in candidates.values()}),
+        m.EventTransition.details['signal_hash'].as_string().in_({finding.signal_hash for finding,_ in candidates.values()})
+    ).order_by(m.EventTransition.occurred_at.desc(),m.EventTransition.id.desc())
+    for event_id,details in db.execute(query):
+        finding,inv=candidates[event_id]
+        if (event_id not in result and isinstance(details,dict) and details.get('investigation_id')==inv.id
+                and details.get('signal_hash')==finding.signal_hash
+                and isinstance(details.get('statement'),str) and details['statement'].strip()
+                and isinstance(details.get('evidence_ids'),list) and details['evidence_ids']):
+            result[event_id]=details
+    return result
+
+
+def _baseline_selection(instance,mapping,calculation):
+    if (not mapping or not mapping.selected or calculation.get('config_revision')!=instance.config_revision
+            or calculation.get('mapping_version')!=mapping.version or calculation.get('source_id')!=mapping.source_id):return None
+    return next((item for item in mapping.items
+        if str(item.get('hostid'))==str(calculation.get('hostid'))
+        and str(item.get('itemid'))==str(calculation.get('itemid'))),None)
+
+
+def _readable_number(value):
+    if not isinstance(value,(int,float)) or isinstance(value,bool) or not math.isfinite(value):return '未知'
+    return f'{value:.4g}'
+
+
+def _finding_presentation(event,finding,instance,mapping,inv,review=None):
+    """Presentation does not rewrite the original event or prove a root cause."""
+    calc=(finding.calculation or {}) if finding else {};state=calc.get('observation_state')
+    title=event.title;summary=None;reviewed=False
+    if finding and finding.category=='baseline_change':
+        item=_baseline_selection(instance,mapping,calc)
+        if item is None:state='configuration_changed'
+        from .zabbix_items import safe_text
+        name=safe_text((item or {}).get('name') or ('监控项 '+str(calc.get('itemid') or '未知')),60)
+        direction={'increase':'升高','decrease':'降低'}.get(calc.get('direction'),'发生变化')
+        title=(name+direction)[:80]
+        unit=safe_text((item or {}).get('units',(item or {}).get('unit','')),24)
+        suffix=(' '+unit) if unit else ''
+        summary=(f"近期中位数 {_readable_number((calc.get('recent') or {}).get('median'))}{suffix}，"
+                 f"参考基线中位数 {_readable_number((calc.get('baseline') or {}).get('median'))}{suffix}；变化待分析。")
+        if review and inv and review.get('investigation_id')==inv.id and review.get('signal_hash')==finding.signal_hash:
+            reviewed=True;title=review['statement'].strip()[:80];summary='AI 提请复核：'+review['statement']
+    elif finding and finding.category=='lock_wait':
+        count=calc.get('row_count')
+        if type(count) is int and count>0 and calc.get('observed_at'):
+            title=f'数据库锁等待（{count} 条等待链）'
+            summary=(f"最近完整快照 {calc['observed_at']} 发现 {count} 条等待链；"
+                     '具体 SQL 与持锁原因需核对对应报告，不能由等待数量推断。')
+    elif finding and finding.category=='capacity_pressure':
+        selected={(str(item.get('hostid')),str(item.get('itemid'))):item for item in mapping.items} if mapping and mapping.selected else {}
+        used=selected.get((str(calc.get('hostid')),str(calc.get('used_itemid'))))
+        limit=selected.get((str(calc.get('hostid')),str(calc.get('limit_itemid'))))
+        if (not used or not limit or calc.get('source_id')!=mapping.source_id
+                or calc.get('mapping_version')!=mapping.version or calc.get('config_revision')!=instance.config_revision):
+            state='configuration_changed'
+        else:
+            from .zabbix_items import safe_text
+            title=(safe_text(used.get('name') or '资源',60)+'容量余量不足')[:80]
+            summary=(f"用量 {_readable_number(calc.get('used'))} / {_readable_number(calc.get('limit'))}，"
+                     f"占用 {_readable_number(calc.get('utilization_percent'))}%，"
+                     f"剩余 {_readable_number(calc.get('remaining'))}；"
+                     f"已达到或超过配置的 {_readable_number(calc.get('warning_percent'))}% 关注水位。具体原因待分析。")
+    elif finding and finding.category=='evidence_correlation':
+        if inv and inv.status in ('completed','partial') and calc.get('assessment_investigation_id')==inv.id:
+            statement=calc.get('statement')
+            if isinstance(statement,str) and statement.strip():
+                title=('待核验：'+statement.strip())[:80];summary=statement
+        else:
+            state='historical_candidate';title='历史候选解释，待复核'
+            summary='当时判断未被本次报告复核，不能据此判断当前状态。' if inv else '等待证据分析；当时判断未被本次报告复核，不能据此判断当前状态。'
+    historical=state in HISTORICAL_OBSERVATIONS or event.status in TERMINAL_EVENTS
+    kind='history' if historical else 'signal' if finding and finding.category=='baseline_change' and not reviewed else 'issue'
+    if state=='configuration_changed':summary='当前监控选择或配置已变化；此处保留历史观测，需要依据新配置的后续样本重新判断。'
+    elif state=='returned_to_baseline':summary='后续实际样本已回到该指标原基线；这不代表业务整体健康或根因已解决。'
+    elif state=='recovered':summary='后续实际观测已恢复；此处保留原问题与报告，不代表整体健康或根因已解决。'
+    return {'title':title,'summary':summary,'presentation_kind':kind,'observation_state':state,
+            'reviewed':reviewed}
+
+
+def _presentation_summary(summary,presentation,finding,freshness):
+    if freshness['status']!='outdated' or presentation['observation_state'] in HISTORICAL_OBSERVATIONS:return summary
+    if presentation['reviewed'] or finding and finding.category=='evidence_correlation':
+        return '报告窗口内：'+summary if summary else freshness['reason']
+    if finding and finding.category in ('baseline_change','capacity_pressure'):return summary
+    if finding and finding.category=='lock_wait' and presentation.get('summary'):return summary
+    return freshness['reason']
+
+
 def _problem_observed_at(db,event,finding,inv):
     observed=[]
     if finding and finding.evidence_ids:
@@ -553,28 +711,21 @@ def issue_response(db,event,finding=None,actor=None):
         except HTTPException: inv=None
     task=db.get(m.Task,inv.task_id) if inv and inv.task_id else None
     report=(inv.report or {}) if inv else {}
-    summary=_related_report_fact(db,inv,finding) if inv else None
+    mapping=mapping_for(db,instance.id) if finding and finding.category in ('baseline_change','capacity_pressure') else None
+    review=_finding_reviews(db,[(event,finding)],{event.id:inv} if inv else {}).get(event.id)
+    presentation=_finding_presentation(event,finding,instance,mapping,inv,review)
+    report_fact=_related_report_fact(db,inv,finding) if inv else None
+    summary=report_fact
     if inv and finding and finding.category=='evidence_correlation': summary=(finding.calculation or {}).get('statement') or summary
     freshness=_report_freshness(db,event,inv,finding)
-    if freshness['status']=='outdated': summary=freshness['reason']
-    observation_state=(finding.calculation or {}).get('observation_state') if finding else None
-    if finding and finding.category=='baseline_change':
-        calc=finding.calculation or {}
-        mapping=mapping_for(db,instance.id)
-        if (not mapping or not mapping.selected or calc.get('config_revision')!=instance.config_revision
-                or calc.get('mapping_version')!=mapping.version or calc.get('source_id')!=mapping.source_id
-                or not any(str(i.get('hostid'))==str(calc.get('hostid')) and str(i.get('itemid'))==str(calc.get('itemid')) for i in mapping.items)):
-            observation_state='configuration_changed'
-    if observation_state=='configuration_changed':
-        summary='当前监控选择或配置已变化；此处保留历史观测，需要依据新配置的后续样本重新判断。'
-    elif finding and finding.category=='baseline_change' and observation_state=='returned_to_baseline':
-        summary='后续实际样本已回到该指标原基线；这不代表业务整体健康或根因已解决。'
-    elif not summary and finding and finding.category=='baseline_change':
-        calc=finding.calculation or {}
-        summary=(f"监控项 {calc.get('itemid','')} 的近期中位数 {calc.get('recent',{}).get('median')}，"
-                 f"基线中位数 {calc.get('baseline',{}).get('median')}；仅表示持续变化，业务影响与原因待分析。")
+    observation_state=presentation['observation_state']
+    if presentation['summary'] is not None:summary=presentation['summary']
+    if (finding and finding.category=='baseline_change' and not presentation['reviewed']
+            and observation_state not in HISTORICAL_OBSERVATIONS and report_fact):
+        summary+=' 报告窗口内：'+report_fact
+    summary=_presentation_summary(summary,presentation,finding,freshness)
     if not summary: summary='报告未提供与该问题直接对应的事实，待定向核验' if inv and report else '分析尚未完成' if inv else '异常已登记，等待证据分析'
-    return {'id':event.id,'event_id':event.id,'title':event.title,'kind':finding.kind if finding else 'current','status':event.status,'severity':event.severity,'summary':(('待核验假设：' if finding and finding.category=='evidence_correlation' else '') + summary),'issue_category':_issue_category(finding),'report_freshness':freshness,'object_names':[instance.name],'instance_ids':[instance.id],'first_seen_at':iso(event.created_at),'updated_at':iso(event.last_seen_at),'investigation_id':inv.id if inv else None,'analysis_mode':(task.payload or {}).get('mode','rules_only') if task else 'rules_only','coverage_status':'complete' if report.get('coverage',{}).get('complete') else 'unknown' if not inv else 'partial','observation_state':observation_state,'finding_status':'hypothesis' if finding and finding.category=='evidence_correlation' else 'conditional_prediction' if finding and finding.kind=='risk' else 'observed','report_status':inv.status if inv else 'not_started','report_error':task.error_code if task else None}
+    return {'id':event.id,'event_id':event.id,'title':presentation['title'],'presentation_kind':presentation['presentation_kind'],'kind':finding.kind if finding else 'current','status':event.status,'severity':event.severity,'summary':(('待核验假设：' if finding and finding.category=='evidence_correlation' else '') + summary),'issue_category':_issue_category(finding),'report_freshness':freshness,'object_names':[instance.name],'instance_ids':[instance.id],'first_seen_at':iso(event.created_at),'updated_at':iso(event.last_seen_at),'investigation_id':inv.id if inv else None,'analysis_mode':(task.payload or {}).get('mode','rules_only') if task else 'rules_only','coverage_status':'complete' if report.get('coverage',{}).get('complete') else 'unknown' if not inv else 'partial','observation_state':observation_state,'finding_status':'hypothesis' if presentation['reviewed'] or finding and finding.category=='evidence_correlation' else 'conditional_prediction' if finding and finding.kind=='risk' and finding.category!='capacity_pressure' else 'observed','report_status':inv.status if inv else 'not_started','report_error':task.error_code if task else None}
 
 
 def _overview_reports(db, rows, allowed_data):
@@ -640,7 +791,7 @@ def _overview_observations(db, rows):
     return evidence,episodes
 
 
-def _overview_issue(event,finding,instance,mapping,inv,task,evidence,episodes,db):
+def _overview_issue(event,finding,instance,mapping,inv,task,evidence,episodes,db,review=None):
     observed=[evidence[identifier].observed_at for identifier in (finding.evidence_ids or [])
               if identifier in evidence and evidence[identifier].instance_id==event.instance_id] if finding else []
     if finding and finding.category=='evidence_correlation' and inv:
@@ -649,34 +800,21 @@ def _overview_issue(event,finding,instance,mapping,inv,task,evidence,episodes,db
         observed.extend(episodes.get(event.id,[]))
         observed_at=max(observed) if observed else event.last_seen_at
     freshness=_report_freshness(db,event,inv,finding,observed_at=observed_at)
-    calculation=(finding.calculation or {}) if finding else {}
-    observation_state=calculation.get('observation_state')
-    summary=calculation.get('statement') if inv and finding and finding.category=='evidence_correlation' else None
-    if finding and finding.category=='baseline_change':
-        if (not mapping or not mapping.selected or calculation.get('config_revision')!=instance.config_revision
-                or calculation.get('mapping_version')!=mapping.version or calculation.get('source_id')!=mapping.source_id
-                or not any(str(item.get('hostid'))==str(calculation.get('hostid')) and str(item.get('itemid'))==str(calculation.get('itemid')) for item in mapping.items)):
-            observation_state='configuration_changed'
-        summary=(f"监控项 {calculation.get('itemid','')} 的近期中位数 {calculation.get('recent',{}).get('median','未知')}，"
-                 f"基线中位数 {calculation.get('baseline',{}).get('median','未知')}；仅表示持续变化，业务影响与原因待分析。")
-    # This headline belongs to the complete authorized report, not a freshly
-    # validated per-item fact. Keep that distinction explicit in the list.
-    if inv and inv.status in ('completed','partial') and inv.headline:
-        summary=(summary+' ' if summary else '')+'关联报告概览：'+inv.headline
-    if freshness['status']=='outdated': summary=freshness['reason']
-    if observation_state=='configuration_changed':
-        summary='当前监控选择或配置已变化；此处保留历史观测，需要依据新配置的后续样本重新判断。'
-    elif finding and finding.category=='baseline_change' and observation_state=='returned_to_baseline':
-        summary='后续实际样本已回到该指标原基线；这不代表业务整体健康或根因已解决。'
+    presentation=_finding_presentation(event,finding,instance,mapping,inv,review)
+    observation_state=presentation['observation_state'];summary=presentation['summary']
+    # A whole-report headline does not review an unrelated numerical signal.
+    if not summary and inv and inv.status in ('completed','partial') and inv.headline:
+        summary='关联报告概览：'+inv.headline
+    summary=_presentation_summary(summary,presentation,finding,freshness)
     if not summary:
         summary=('报告已形成；打开报告查看完整事实与证据。' if inv.status in ('completed','partial') else '分析尚未完成') if inv else '异常已登记，等待证据分析'
-    return {'id':event.id,'event_id':event.id,'title':event.title,'kind':finding.kind if finding else 'current',
+    return {'id':event.id,'event_id':event.id,'title':presentation['title'],'presentation_kind':presentation['presentation_kind'],'kind':finding.kind if finding else 'current',
         'status':event.status,'severity':event.severity,'summary':('待核验假设：' if finding and finding.category=='evidence_correlation' else '')+summary,
         'issue_category':_issue_category(finding),'report_freshness':freshness,'object_names':[instance.name],
         'instance_ids':[instance.id],'first_seen_at':iso(event.created_at),'updated_at':iso(event.last_seen_at),
         'investigation_id':inv.id if inv else None,'analysis_mode':task.mode or 'rules_only' if task else 'rules_only',
         'coverage_status':'complete' if inv and inv.coverage_complete is True else 'partial' if inv else 'unknown',
-        'observation_state':observation_state,'finding_status':'hypothesis' if finding and finding.category=='evidence_correlation' else 'conditional_prediction' if finding and finding.kind=='risk' else 'observed',
+        'observation_state':observation_state,'finding_status':'hypothesis' if presentation['reviewed'] or finding and finding.category=='evidence_correlation' else 'conditional_prediction' if finding and finding.kind=='risk' and finding.category!='capacity_pressure' else 'observed',
         'report_status':inv.status if inv else 'not_started','report_error':task.error_code if task else None}
 
 
@@ -700,16 +838,15 @@ def overview(actor, **scope):
     rows=list(db.execute(select(m.Event,m.InspectionFinding).outerjoin(m.InspectionFinding,m.InspectionFinding.event_id==m.Event.id)
         .where(m.Event.instance_id.in_(visible),m.Event.status.notin_(TERMINAL_EVENTS))
         .order_by(m.Event.last_seen_at.desc(),m.Event.id).limit(200)))
-    rows=[(event,finding) for event,finding in rows if not finding or (finding.calculation or {}).get('observation_state')!='recovered']
     reports,tasks=_overview_reports(db,rows,allowed_data)
     evidence,episodes=_overview_observations(db,rows)
+    reviews=_finding_reviews(db,rows,reports)
     issues=[_overview_issue(event,finding,instances[event.instance_id],mappings.get(event.instance_id),
         reports.get(event.id),tasks.get(reports[event.id].task_id) if event.id in reports else None,
-        evidence,episodes,db) for event,finding in rows]
+        evidence,episodes,db,reviews.get(event.id)) for event,finding in rows]
     objects=[instance for identifier,instance in instances.items() if identifier in current_ids and instance.enabled and instance.lifecycle_state=='Active']
     missing=sum(capability['status']!='available' for instance in objects if instance.id in mappings for capability in mappings[instance.id].capabilities)
-    historical={'returned_to_baseline','recovered','configuration_changed'}
-    return {'stats':{'current':sum(i['kind']=='current' and i.get('observation_state') not in historical for i in issues),'risk':sum(i['kind']=='risk' and i.get('observation_state') not in historical for i in issues),'objects':len(objects)},'issues':issues,'inspection':inspection_projection(db,visible),'coverage':{'status':'partial' if missing else 'unknown','missing_count':missing}}
+    return {'stats':{'current':sum(i['kind']=='current' and i['presentation_kind']=='issue' for i in issues),'risk':sum(i['kind']=='risk' and i['presentation_kind']=='issue' for i in issues),'objects':len(objects)},'issues':issues,'inspection':inspection_projection(db,visible),'coverage':{'status':'partial' if missing else 'unknown','missing_count':missing}}
 
 
 def issue_detail(actor, identifier):

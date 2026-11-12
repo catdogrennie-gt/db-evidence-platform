@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Card, Space, Switch, Tag } from 'antd';
 import { api, ApiError } from './api';
 import type { Row } from './api';
-import { RESOURCE_REFRESH_MS, useCan, useResource, useScope } from './hooks';
+import { useCan, useResource, useScope } from './hooks';
 import { HistoricalInvestigationReport } from './Historical';
 import { FrozenMetricDrawer, MetricPanel } from './Intelligence';
 import { chartData, frozenMetricPath } from './intelligenceModel';
@@ -121,9 +121,8 @@ export function Demo() {
   useEffect(() => {
     if (!allowed) return;
     mounted.current = true;
-    const timer = setInterval(() => setRefresh(value => value + 1), RESOURCE_REFRESH_MS);
     const clock = setInterval(() => setElapsed(anchor.current ? Math.max(0, (Date.now() - anchor.current) / 1000) : 0), 1000);
-    return () => { mounted.current = false; clearInterval(timer); clearInterval(clock); };
+    return () => { mounted.current = false; clearInterval(clock); };
   }, [allowed]);
   useEffect(() => {
     anchor.current = receivedAt ? Date.parse(receivedAt) : 0;

@@ -119,6 +119,90 @@ def test_fixed_front_door_requires_loopback_management():
         gateway.build_front_door("127.0.0.1:19001", "http://127.0.0.1:19002", "0.0.0.0:19003")
 
 
+def test_public_read_only_gateway_blocks_non_read_methods_before_proxy():
+    gateway = module()
+    value = spec("http://127.0.0.1:19197")
+    value["public_read_only"] = True
+    routes = gateway.build_config(value)["apps"]["http"]["servers"]["edge"]["routes"]
+    guard = routes[0]
+    assert guard["match"] == [{"not": [{"method": ["GET", "HEAD", "OPTIONS"]}]}]
+    assert guard["handle"] == [{"handler": "static_response", "status_code": 403}]
+    assert guard["terminal"] is True
+    assert routes[-1]["handle"][0]["handler"] == "reverse_proxy"
+
+
+def test_normal_platform_gateway_keeps_login_methods_available():
+    gateway = module()
+    value = spec("http://127.0.0.1:19197")
+    routes = gateway.build_config(value)["apps"]["http"]["servers"]["edge"]["routes"]
+    assert not any(route.get("match") == [{"not": [{"method": ["GET", "HEAD", "OPTIONS"]}]}]
+                   for route in routes)
+
+
+def test_public_read_only_option_requires_boolean():
+    gateway = module()
+    value = spec("http://127.0.0.1:19197")
+    value["public_read_only"] = "false"
+    with pytest.raises(gateway.ReleaseError):
+        gateway.build_config(value)
+
+
+@pytest.mark.parametrize('frontend', [False, True])
+@pytest.mark.parametrize('read_only', [False, True])
+def test_real_caddy_public_read_only_stops_writes_before_any_upstream(tmp_path, frontend, read_only):
+    """Use isolated ephemeral listeners; never send a request to the real Lab."""
+    from urllib.error import HTTPError
+    binary=os.environ.get('RELEASE_GATEWAY_CADDY')
+    if not binary or not Path(binary).is_file():
+        pytest.skip('Set RELEASE_GATEWAY_CADDY to run verified Caddy integration')
+    calls=[]
+    class Handler(BaseHTTPRequestHandler):
+        def reply(self):
+            calls.append((self.command,self.path))
+            raw=b'{"accepted":true}'
+            self.send_response(200);self.send_header('Content-Length',str(len(raw)));self.end_headers()
+            if self.command!='HEAD':self.wfile.write(raw)
+        do_GET=do_HEAD=do_OPTIONS=do_POST=do_PUT=do_PATCH=do_DELETE=do_TRACE=do_BREW=reply
+        def log_message(self,*args):pass
+    upstream=ThreadingHTTPServer(('127.0.0.1',0),Handler)
+    thread=threading.Thread(target=upstream.serve_forever,daemon=True);thread.start()
+    gateway=module();value=spec(f'http://127.0.0.1:{upstream.server_port}',
+        frontend=release(tmp_path,'read-only-build',gateway) if frontend else None)
+    if read_only:value['public_read_only']=True
+    path=tmp_path/'caddy-test.json';path.write_text(json.dumps(gateway.build_config(value)))
+    process=None
+    try:
+        process=subprocess.Popen([binary,'run','--config',str(path)],stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0,
+            env=dict(os.environ,XDG_DATA_HOME=str(tmp_path/'caddy-data')))
+        for _ in range(60):
+            if process.poll() is not None:pytest.fail('Isolated Caddy exited before readiness')
+            try:
+                request('http://'+value['listen']+'/api/status');break
+            except OSError:time.sleep(.05)
+        else:pytest.fail('Isolated Caddy did not become ready')
+        calls.clear();client=build_opener(ProxyHandler({}));base='http://'+value['listen']
+        for method in ('GET','HEAD','OPTIONS'):
+            with client.open(Request(base+'/api/read',method=method),timeout=3) as response:
+                assert response.status==200
+        assert [method for method,_ in calls]==['GET','HEAD','OPTIONS']
+        if read_only:
+            for method in ('POST','PUT','PATCH','DELETE','TRACE','BREW'):
+                for target in ('/api/switch','/api/v1/login','/outside','/%61pi/switch'):
+                    with pytest.raises(HTTPError) as error:
+                        client.open(Request(base+target,method=method),timeout=3)
+                    assert error.value.code==403
+            assert len(calls)==3,'A blocked write must never reach any upstream'
+        else:
+            with client.open(Request(base+'/api/v1/login',data=b'{}',method='POST'),timeout=3) as response:
+                assert response.status==200
+            assert calls[-1]==('POST','/api/v1/login'),'Default B login must remain available'
+    finally:
+        if process is not None:
+            process.terminate();process.wait(timeout=10)
+        upstream.shutdown();upstream.server_close();thread.join(timeout=3)
+
+
 def test_snapshot_pins_build_and_detects_later_edit(tmp_path):
     gateway = module()
     snapshot = release(tmp_path, "blue", gateway)

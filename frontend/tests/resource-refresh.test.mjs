@@ -160,11 +160,14 @@ test('leaving a readable resource aborts pending reads and late responses cannot
   } finally { await view.dispose(); }
 });
 
-test('manual refresh only re-reads data; UI polling has a single one-minute interval contract', async () => {
+test('default resource reads do not poll; manual refresh still re-reads without writes', async (t) => {
   assert.equal(RESOURCE_REFRESH_MS, 60_000);
+  t.mock.timers.enable({ apis: ['setInterval'] });
   const view = await reader();
   try {
     await succeed(0);
+    await act(async () => t.mock.timers.tick(3 * RESOURCE_REFRESH_MS));
+    assert.equal(calls.length, 1, 'elapsed time alone must not re-read a default resource');
     await act(async () => view.snapshot.reload());
     assert.equal(calls.length, 2);
     assert.equal(calls[1].path, path);

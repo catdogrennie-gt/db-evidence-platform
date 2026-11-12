@@ -388,3 +388,166 @@ def prepare_tool_context(result, max_bytes):
     if len(json.dumps(result,ensure_ascii=False,separators=(',',':')).encode()) > max_bytes:
         result=bounded_tool_result(result,max_bytes)
     return result
+
+
+def _unpack_final_tables(initial):
+    """Decode only our explicit model tables before deriving another projection."""
+    result=deepcopy(initial); times=result.get('numeric_time_dictionary',[])
+    def fields(columns,values,dictionaries):
+        decoded={}
+        for name,value in zip(columns,values):
+            key=name[:-4] if name.endswith('_ref') else name
+            if name.endswith('_ref') and key in dictionaries:
+                value=dictionaries[key][value]; name=key
+            elif name.endswith('_ref') and type(value) is int:
+                value=times[value]; name=key
+            target=decoded
+            parts=name.split('.')
+            for part in parts[:-1]:target=target.setdefault(part,{})
+            target[parts[-1]]=value
+        return decoded
+    for index,item in enumerate(result.get('evidence',[])):
+        if not isinstance(item.get('numeric_observation'),list):continue
+        decoded=fields(result.get('numeric_observation_columns',[]),item['numeric_observation'],
+                       result.get('numeric_observation_dictionaries',{}))
+        decoded['evidence_id']=item['evidence_id']
+        for point in (decoded.get('data') or {}).get('rows',[]):
+            if 'time_ref' in point:point['time']=times[point.pop('time_ref')]
+        result['evidence'][index]=decoded
+    for signal in result.get('inspection_signals',[]):
+        if isinstance(signal.get('calculation'),list):
+            signal['calculation']=fields(result.get('signal_calculation_columns',[]),signal['calculation'],
+                                         result.get('signal_calculation_dictionaries',{}))
+    for key in ('numeric_time_dictionary','numeric_observation_columns','numeric_observation_dictionaries',
+                'signal_calculation_columns','signal_calculation_dictionaries'):result.pop(key,None)
+    return result
+
+
+def compact_final_context(initial, *, max_bytes, measure, protected_evidence_ids=()):
+    """Pack frozen evidence against the caller's complete final-request budget.
+
+    Keep all supplied signal/required references. Reduce display detail before
+    removing independent unprotected dimensions. If the protected context alone
+    cannot fit, return it over budget for the caller's existing fail-closed guard.
+    The callback must be pure and include the complete assistant/tool group.
+    """
+    original=deepcopy(initial)
+    original.setdefault('coverage',{})['retained_evidence_count']=len(original.get('evidence',[]))
+    refresh_snapshot_chronology(original,sort=True)
+    if measure(original)<=max_bytes:return original
+    working=_unpack_final_tables(original)
+    protected=set(protected_evidence_ids)
+    protected.update(ref for signal in working.get('inspection_signals',[])
+                     for ref in signal.get('evidence_ids',[]))
+    # Preserve actual source families and their nonempty/latest snapshot anchors,
+    # including later empty evidence needed for truthful chronology.
+    layers={}
+    for item in working.get('evidence',[]):
+        if str(item.get('source','')).startswith('zabbix.item.numeric:'):continue
+        data=item.get('data') or {};meta=data.get('item') or {}
+        if data.get('observation_unavailable') or data.get('text_omitted'):continue
+        identity=(item.get('instance_id'),item.get('source'),item.get('template'),meta.get('hostid'),meta.get('itemid'))
+        layers.setdefault(identity,[]).append(item)
+        if item.get('selection_reason')=='nonempty_lock_snapshot':protected.add(item['evidence_id'])
+    for items in layers.values():
+        valid=[item for item in items if _snapshot_time(item) is not None]
+        ordered=sorted(valid or items,key=lambda item:(_snapshot_time(item) or parse_time('9999-01-01T00:00:00Z'),item['evidence_id']))
+        protected.add(ordered[-1]['evidence_id'])
+        nonempty=[item for item in ordered if (item.get('data') or {}).get('row_count',0)>0
+                  or (item.get('data') or {}).get('event_count',0)>0]
+        if nonempty:protected.update((nonempty[0]['evidence_id'],nonempty[-1]['evidence_id']))
+
+    def packed():
+        result=deepcopy(working)
+        series=result.get('numeric_series') or {}
+        for position,name in enumerate(series.get('columns',[])):
+            if not name.endswith('_ref'):continue
+            key=name[:-4]+'_dictionary';dictionary=series.get(key)
+            if not isinstance(dictionary,list):continue
+            used=sorted({row[position] for row in series.get('rows',[])})
+            replacements={old:new for new,old in enumerate(used)}
+            series[key]=[dictionary[old] for old in used]
+            for row in series.get('rows',[]):row[position]=replacements[row[position]]
+        _encode_numeric_context(result)
+        result.setdefault('coverage',{})['retained_evidence_count']=len(result.get('evidence',[]))
+        refresh_snapshot_chronology(result,sort=True)
+        return result
+    def thin_points(limit):
+        for item in working.get('evidence',[]):
+            data=item.get('data') or {}
+            if (not str(item.get('source','')).startswith('zabbix.item.numeric:')
+                    or data.get('projection_scope')!='retained_samples_subset_not_upstream_gap'):continue
+            rows=data.get('rows')
+            if isinstance(rows,list) and len(rows)>limit:
+                retained=rows[-1:] if limit==1 else [rows[0],rows[-1]]
+                data['rows_omitted']=data.get('rows_omitted',0)+len(rows)-len(retained)
+                data['rows']=retained
+            meta=data.get('item') or {}
+            for name in ('interval','interval_verified','history_semantics'):meta.pop(name,None)
+    def omit_series_columns(names):
+        series=working.get('numeric_series') or {};columns=series.get('columns',[])
+        positions=[i for i,name in enumerate(columns) if name.removesuffix('_ref') in names]
+        if not positions:return
+        omitted=series.setdefault('projection_columns_omitted',[])
+        for i in positions:
+            if columns[i] not in omitted:omitted.append(columns[i])
+            if columns[i].endswith('_ref'):series.pop(columns[i][:-4]+'_dictionary',None)
+        series['columns']=[name for i,name in enumerate(columns) if i not in positions]
+        series['rows']=[[value for i,value in enumerate(row) if i not in positions] for row in series.get('rows',[])]
+
+    thin_points(2)
+    result=packed()
+    if measure(result)<=max_bytes:return result
+    omit_series_columns({'key','sampling_method'})
+    for item in working.get('evidence',[]):
+        data=item.get('data') or {}
+        if (str(item.get('source','')).startswith('zabbix.item.numeric:')
+                and data.get('projection_scope')=='retained_samples_subset_not_upstream_gap'):
+            # IDs, human labels, units and verified semantics remain. Scheduling
+            # keys and absent cross-projection aliases are redundant display data.
+            (data.get('item') or {}).pop('key',None)
+            if data.get('numeric_series_ref') is None:data.pop('numeric_series_ref',None)
+    result=packed()
+    if measure(result)<=max_bytes:return result
+    thin_points(1)
+    result=packed()
+    if measure(result)<=max_bytes:return result
+    # Latest measured values, true sample counts/ranges, source gaps and semantics
+    # remain. Missing display statistics are explicit columns, never invented zeroes.
+    omit_series_columns({'first','min','max'})
+    result=packed()
+    if measure(result)<=max_bytes:return result
+    while measure(result)>max_bytes:
+        series=working.get('numeric_series') or {};rows=series.get('rows',[])
+        candidates=[i for i,row in enumerate(rows) if row[0] not in protected]
+        if candidates:
+            columns=series.get('columns',[])
+            def features(index):
+                row=rows[index];values={('resource',row[1]),('host',row[1],row[2])}
+                for field in ('value_semantics',):
+                    name=field if field in columns else field+'_ref'
+                    if name not in columns:continue
+                    value=row[columns.index(name)]
+                    if name.endswith('_ref'):value=series[field+'_dictionary'][value]
+                    if isinstance(value,str):values.add((field,row[1],value))
+                return values
+            # Balance the unprotected normal candidates themselves. Protected
+            # triggers on one host must not exhaust another host's normal data.
+            observed={i:features(i) for i in candidates}
+            counts=Counter(feature for values in observed.values() for feature in values)
+            index=min(candidates,key=lambda i:(sum(counts[f]==1 for f in observed[i]),
+                                               -sum(counts[f] for f in observed[i]),-i))
+            removed=rows.pop(index)[0]
+            series['omitted_count']=series.get('omitted_count',0)+1
+            series['omission_reason']='remaining_total_context_budget'
+            for item in working.get('evidence',[]):
+                data=item.get('data') or {}
+                if data.get('numeric_series_ref')==removed:data['numeric_series_ref']=None
+        else:
+            candidates=[i for i,item in enumerate(working.get('evidence',[])) if item['evidence_id'] not in protected]
+            if not candidates:break
+            working['evidence'].pop(candidates[-1])
+            coverage=working.setdefault('coverage',{})
+            coverage['context_omitted_evidence_count']=coverage.get('context_omitted_evidence_count',0)+1
+        result=packed()
+    return result

@@ -36,6 +36,7 @@ export interface Issue {
   id: string;
   title: string;
   kind: 'current' | 'risk';
+  presentation_kind?: 'issue' | 'signal' | 'history';
   status: string;
   severity: string;
   summary: string;
@@ -379,13 +380,15 @@ export function frozenMetricPath(investigationId: string | null, reference: stri
     ? `/investigations/${investigationId}/metric-windows/${item}`
     : null;
 }
-export function isHistoricalObservation(issue: Pick<Issue, 'observation_state'>): boolean {
-  return ['returned_to_baseline','recovered','configuration_changed'].includes(issue.observation_state ?? '');
+export function isHistoricalObservation(issue: Pick<Issue, 'observation_state' | 'presentation_kind'>): boolean {
+  return issue.presentation_kind === 'history' || ['returned_to_baseline','recovered','configuration_changed'].includes(issue.observation_state ?? '');
 }
-export function findingLabel(issue: Pick<Issue, 'kind' | 'finding_status' | 'observation_state'>): string {
+export function findingLabel(issue: Pick<Issue, 'kind' | 'finding_status' | 'observation_state' | 'presentation_kind'>): string {
   if (issue.observation_state === 'returned_to_baseline') return '指标已回基线';
   if (issue.observation_state === 'configuration_changed') return '配置已变化 · 历史观测';
   if (issue.observation_state === 'recovered') return '后续观测已恢复';
+  if (issue.presentation_kind === 'history') return issue.finding_status === 'hypothesis' ? '历史候选解释 · 待复核' : '历史观测';
+  if (issue.presentation_kind === 'signal') return '变化线索 · 尚未判定为问题';
   if (issue.finding_status === 'hypothesis') return '候选解释 · 待核验';
   if (issue.finding_status === 'conditional_prediction') return '条件预测';
   return issue.kind === 'current' ? '当前问题' : '潜在风险';
@@ -581,7 +584,6 @@ export function compactIssueNodes(
   return selected;
 }
 
-export function initialRollingWindow(pathname: string, search: string): boolean {
-  const params = new URLSearchParams(search);
-  return pathname === '/' && !params.has('from') && !params.has('to');
+export function initialRollingWindow(_pathname: string, _search: string): boolean {
+  return false;
 }

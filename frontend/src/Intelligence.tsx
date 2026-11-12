@@ -19,7 +19,7 @@ import type { Row } from './api';
 import type { ExecutiveSummaryData } from './ExecutiveSummary';
 import type { EChartsOption } from 'echarts';
 import { query, text } from './api';
-import { RESOURCE_REFRESH_MS, useCan, useResource, useScope, useScopedPath } from './hooks';
+import { useCan, useResource, useScope, useScopedPath } from './hooks';
 import { Chart, ContextLink, LoadState, SourceCoverage, Status, Time, Title } from './ui';
 import { InvestigationReportView } from './Presentation';
 import {
@@ -179,28 +179,7 @@ export function IntelligenceHome() {
                 </Card>
               ) : (
                 <>
-                  <IssueSection
-                    title="当前问题"
-                    description="优先处理正在发生的异常"
-                    issues={data.issues.filter((i) => i.kind === 'current' && !isHistoricalObservation(i))}
-                    empty={
-                      data.inspection.last_completed_at
-                        ? '最近已完成巡检未返回当前问题。仍请关注来源覆盖和未核对项。'
-                        : '等待首轮有效巡检。尚无结果不代表健康。'
-                    }
-                  />
-                  <IssueSection
-                    title="潜在风险"
-                    description="尚未确认为故障，候选解释与条件预测分别标明"
-                    issues={data.issues.filter((i) => i.kind === 'risk' && !isHistoricalObservation(i))}
-                    empty="当前没有足够证据支持的潜在风险或待核验假设。数据不足时不生成精确预测。"
-                  />
-                  {data.issues.some(isHistoricalObservation) && <IssueSection
-                    title="历史观测"
-                    description="指标已回到原基线，或监控配置已变化；保留报告供回查，不代表根因已解决。"
-                    issues={data.issues.filter(isHistoricalObservation)}
-                    empty="暂无历史观测。"
-                  />}
+                  <IssueOverviewSections issues={data.issues} inspected={!!data.inspection.last_completed_at} />
                 </>
               )}
               <LoadState {...recent} loading={recent.loading && !recentData} retry={recent.reload}>{recentData && <RecentAnalyses reports={recentData.items} />}</LoadState>
@@ -214,6 +193,27 @@ export function IntelligenceHome() {
       )}
     </div>
   );
+}
+
+export function IssueOverviewSections({ issues, inspected }: { issues: Issue[]; inspected: boolean }) {
+  const active = issues.filter((issue) => !isHistoricalObservation(issue) && issue.presentation_kind !== 'signal');
+  const signals = issues.filter((issue) => !isHistoricalObservation(issue) && issue.presentation_kind === 'signal');
+  const recentRecovered = issues.filter((issue) => isHistoricalObservation(issue)
+    && issue.observation_state === 'recovered' && issue.finding_status === 'observed').slice(0, 3);
+  const recoveredIds = new Set(recentRecovered.map((issue) => issue.id));
+  const historical = issues.filter((issue) => isHistoricalObservation(issue) && !recoveredIds.has(issue.id));
+  return <>
+    <IssueSection title="当前问题" description="查看具体异常、原因依据和处理建议" issues={active.filter((issue) => issue.kind === 'current')}
+      empty={inspected ? '最近巡检尚未形成需要处理的问题；变化线索和巡检记录在下方。' : '等待首轮有效巡检。尚无结果不代表健康。'} />
+    <IssueSection title="潜在风险" description="有证据支持、尚未发生故障的风险；候选解释仍需核验" issues={active.filter((issue) => issue.kind === 'risk')} empty="当前没有足够证据支持的潜在风险。" />
+    {!!recentRecovered.length && <IssueSection title="最近已恢复的问题" description="保留实际发生过的问题和报告入口，不计入当前异常；恢复不代表整体健康或具体根因已解决。" issues={recentRecovered} empty="暂无已恢复的问题。" />}
+    {!!signals.length && <details className="intel-details"><summary>变化线索 · {signals.length} 项（尚未判定为问题）</summary>
+      <IssueSection title="变化线索" description="指标变化也可能来自改善或正常负载调整；经分析支持的问题才进入上方列表。" issues={signals} empty="暂无变化线索。" />
+    </details>}
+    {!!historical.length && <details className="intel-details"><summary>历史观测 · {historical.length} 项</summary>
+      <IssueSection title="历史观测" description="保留当时的候选解释、已回落指标和配置变更记录；不代表当前仍异常或根因已解决。" issues={historical} empty="暂无历史观测。" />
+    </details>}
+  </>;
 }
 
 function IssueSection({
@@ -261,7 +261,7 @@ function IssueSection({
                   <span className="intel-dot">·</span> <Status value={issue.analysis_mode} />
                   <ReportCoverageTag status={issue.coverage_status} />
                 </span>
-                <ContextLink to={`/issues/${issue.id}`}>查看问题报告 →</ContextLink>
+                <ContextLink to={`/issues/${issue.id}`}>{isHistoricalObservation(issue) ? '查看历史观测' : issue.presentation_kind === 'signal' ? '查看变化线索' : '查看问题报告'} →</ContextLink>
               </div>
             </Card>
           ))}
@@ -732,11 +732,10 @@ export function IssueReport() {
   const { id } = useParams();
   const { refresh } = useScope();
   const can = useCan();
-  const [tick, setTick] = useState(0);
   const [selectedReference, setSelectedReference] = useState<string>();
   const resource = useResource<IssueDetail & { report_status?: string; report_error?: string }>(
     can('data.read') && can('event.read') ? `/intelligence/issues/${id}` : null,
-    refresh + tick,
+    refresh,
   );
   const data = resource.data;
   const state = data
@@ -744,15 +743,6 @@ export function IssueReport() {
     : 'unavailable';
 
   useEffect(() => setSelectedReference(undefined), [id]);
-  useEffect(() => {
-    if (
-      state !== 'pending' &&
-      !['pending', 'outdated'].includes(data?.report_freshness?.status ?? '')
-    )
-      return;
-    const timer = setInterval(() => setTick((value) => value + 1), RESOURCE_REFRESH_MS);
-    return () => clearInterval(timer);
-  }, [state, id, data?.report_freshness?.status]);
   return (
     <div className="intel-page">
       <div className="intel-breadcrumb">
@@ -1023,6 +1013,12 @@ export function ReportEvidence({ data, onMetricReference }: { data: IssueDetail;
   const state = reportState({ ...data, status: String(data.report_status ?? data.status) });
   const charts = prioritizeIssueCharts((data.charts ?? []).filter(chart => chartData(chart.points ?? []).some(([, value]) => value !== null)), data.issue_category, data.event_subject?.id ?? data.instance_ids?.[0]);
   return <>
+    {data.finding_status === 'observed' && data.summary && data.presentation_kind !== 'signal' && <Alert
+      className="intel-gap-banner" showIcon
+      type={isHistoricalObservation(data) ? 'info' : 'warning'}
+      title={`${isHistoricalObservation(data) ? '后续观测' : data.kind === 'risk' ? '已检测的风险' : '已检测的问题'}：${data.title}`}
+      description={<><p>{data.summary}</p><small>实际观测 <Time value={data.report_freshness?.event_updated_at ?? data.updated_at} />。下方 AI 报告解释其标注的历史时间窗。</small></>}
+    />}
     {data.report && state !== 'ready' && <Alert type="warning" showIcon title="保留的历史输出" description="本次分析尚未成功完成，以下已保留内容不能代表当前问题已完成诊断。" />}
     <ExecutiveSummary report={data.report} mode={data.analysis_mode} onMetricReference={onMetricReference} />
     {data.report && <details className="intel-details intel-report-prose"><summary>分析过程与原始报告</summary><InvestigationReportView data={data.report} onMetricReference={onMetricReference} /></details>}
@@ -1032,7 +1028,7 @@ export function ReportEvidence({ data, onMetricReference }: { data: IssueDetail;
 }
 
 export function RecentAnalyses({ reports }: { reports: Row[] }) {
-  return <section className="intel-section"><div className="intel-section-head"><h2>最近分析</h2><span>包含正常巡检 · 按当前授权范围</span></div>
+  return <details className="intel-details"><summary>巡检记录（最近分析）</summary><section className="intel-section"><div className="intel-section-head"><h2>最近分析</h2><span>包含正常巡检；巡检完成不等于发现问题</span></div>
     {reports.length ? <div className="intel-recent-reports">{reports.slice(0, 3).map(report => {
       const summary = (report.report as Row | undefined)?.executive_summary as ExecutiveSummaryData | undefined;
       const complete = ['completed', 'succeeded'].includes(String(report.status));
@@ -1042,7 +1038,7 @@ export function RecentAnalyses({ reports }: { reports: Row[] }) {
         {complete && report.mode !== 'rules_only' && summary && <p>{summary.conclusion.statement}</p>}
         <ContextLink to={`/investigations/${report.id}`}>查看冻结报告 →</ContextLink></Card>;
     })}</div> : <div className="intel-empty-inline">当前范围与时间内尚无分析报告。</div>}
-  </section>;
+  </section></details>;
 }
 
 

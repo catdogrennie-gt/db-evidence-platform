@@ -51,7 +51,7 @@ export function ExecutiveSummary({ report, onMetricReference, mode }: { report: 
       <section className="executive-column"><h3>发生了什么</h3><ClaimStatus claim={summary.phenomenon} /><p>{summary.phenomenon.statement}</p></section>
       <section className="executive-column"><h3>为什么</h3><h4>各层原因</h4>
         {summary.surface_causes.length ? <ul className="executive-cause-list">{summary.surface_causes.map((claim, i) => <li key={i}><ClaimStatus claim={claim} /><p>{claim.statement}</p></li>)}</ul> : <p className="intel-muted">未提出独立表层原因。</p>}
-        <div className="executive-root-status"><strong>联合根因候选</strong><ClaimStatus claim={summary.joint_root_cause} /></div>
+        <div className="executive-root-status"><strong>联合根因候选</strong><ClaimStatus claim={summary.joint_root_cause} /><p>{summary.joint_root_cause.statement}</p></div>
       </section>
       <section className="executive-column"><h3>现在怎么做</h3>
         {summary.recommended_actions.length ? <ol className="executive-action-list">{summary.recommended_actions.map((action, i) => <li key={i}><p>{action.description}</p><ActionBadges action={action} /></li>)}</ol> : <p className="intel-muted">未提出建议操作。</p>}
