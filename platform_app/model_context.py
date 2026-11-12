@@ -473,6 +473,13 @@ def compact_final_context(initial, *, max_bytes, measure, protected_evidence_ids
             replacements={old:new for new,old in enumerate(used)}
             series[key]=[dictionary[old] for old in used]
             for row in series.get('rows',[]):row[position]=replacements[row[position]]
+        if isinstance(series.get('rows'),list) and not series['rows']:
+            # Empty tables have no row that can use their decoding schema.
+            # Keep resource identity, relationships and omission/scope metadata.
+            series.pop('columns',None)
+            for key in list(series):
+                if key.endswith('_dictionary') and series[key]==[]:
+                    series.pop(key)
         _encode_numeric_context(result)
         result.setdefault('coverage',{})['retained_evidence_count']=len(result.get('evidence',[]))
         refresh_snapshot_chronology(result,sort=True)

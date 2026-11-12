@@ -186,3 +186,14 @@ node frontend/scripts/check-connection-contracts.cjs
 复现入口：`python -m pytest tests/platform/test_lock_anchor_retention.py tests/platform/test_snapshot_source_identity.py tests/platform/test_snapshot_compaction_identity.py tests/platform/test_reasoning_evidence_contract.py -q`。对应计划见[采样范围改进](../superpowers/plans/2026-11-13-retained-snapshot-scope.md)。
 
 一次标准 API 历史复核实际调用 DeepSeek 一轮（5711 输入、1569 输出 token），保留并正确区分两份非空快照，不再外推全窗仅一次；原始证据及旧记录不变。本次是手工历史对照，不计为新的自主发现。报告仍将后续空采样归为“自行恢复”，并混用数值点与快照计数、缺少直接引用，故整份诊断不标通过，公开故障页继续关闭。
+
+## 9. 空数值表的最终预算收尾（FR-022～025 / AT-013 补充）
+
+状态：**已实现并通过程序及实际输入离线重放；新自主报告已产出，容量风险解释仍未通过**。
+
+- CAPACITY-03 自主发现 33/40、82.5%、余量 7、超过配置的 80% 水位，冻结范围及关闭恢复通过；两次模型取证后预算失败，没有最终报告。
+- 最小修复仅在表无保留行时删除列定义及空字典，保留资源身份、关系和省略说明。新回归先 RED 后 GREEN，完整后端 **1099 passed、10 skipped、6 subtests**；预算及模型提示不变。
+- 精确实际输入离线重放：最终输入由 17074 降至 16683，连同先前实际用量 11113 和输出预留 4000 合为 31796/32000；两条触发证据、全部配对、值及来源不变。普通五维曲线在该最终上下文中已明确省略，不声称保留全部正常反证。
+- CAPACITY-04 一轮模型请求产出报告，5059 输入、1509 输出 token；不是旧第三轮分支的真实回归。数值及双操作数引用正确，但未明确承认配置水位风险，且运行线程不能单独反证 SQL 压力，完整语义仍 FAIL。
+
+复现：`python -m pytest tests/platform/test_empty_series_compaction.py tests/platform/test_final_context_coverage.py tests/platform/test_snapshot_compaction_identity.py -q`。原报告及失败保留，停止追加同类故障和模型重试；规则事实与 AI 解释的展示分层仍在实施中。
