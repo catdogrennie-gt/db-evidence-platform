@@ -127,6 +127,7 @@ Remove-Item -LiteralPath (Join-Path $platformPrivate 'mysql-first-start.sql')
 | --- | --- |
 | `0005_monitoring` | `monitoring_sources`、`monitoring_mappings`；外部对象 UUID 可未知；原直连形态仅保留历史兼容 |
 | `0006_inspection` | `inspection_policies`、`inspection_dispatches`、`inspection_findings`；关联原用户、实例、事件、调查与任务 |
+| `0007_demo` | 演示运行状态与控制记录；普通平台部署仍通过 `upgrade head` 完成迁移 |
 
 在目标运行目录的私密配置已核对、控制 schema 已选定后，显式设置配置再迁移。以下不打印配置或数据库口令：
 
@@ -144,7 +145,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Bootstrap failed.' }
 
 API 不自动迁移或创建用户，bootstrap 不重置已有用户密码。管理员先建组织/系统/用户，按业务范围授权，再接入目标。不要为展示便利给管理员补全局业务权限。空平台不会从旧实验自动发现目标。
 
-当前源码 head 为 `0006_inspection`。历史独立新 schema 已迁移到此版本并通过 readiness；全部旧数据形态的原位升级尚未逐项验证。已有环境升级先执行第 6 节的恢复点与停写流程，不重新运行空库初始化。`downgrade` 可能删除巡检记录，且外部对象未知 UUID 会限制 `0005` 回退；恢复旧源码不等于安全回退数据结构。
+当前源码 head 为 `0007_demo`，可用 `alembic current` 与 readiness 核对实际部署版本。历史独立新 schema 的验收记录保留各自当时的迁移版本；全部旧数据形态的原位升级尚未逐项验证。已有环境升级先执行第 6 节的恢复点与停写流程，不重新运行空库初始化。`downgrade` 可能删除巡检记录，且外部对象未知 UUID 会限制 `0005` 回退；恢复旧源码不等于安全回退数据结构。
 
 Zabbix 来源使用独立只读凭据，不使用旧实验 operator/root。平台不创建目标用户、GRANT、业务库、DDL 或开启日志，缺权限显示缺口。旧 SSH profiles / known_hosts 随历史备份保留，不构成当前采集入口。模型默认空配置、模式默认 `rules_only`；启用外部模型另需私密供应商设置、业务策略及明确外发许可。DeepSeek 等为私密可选模型，不将个人 Pro 账号、端点或密钥写入公库。新请求输入硬界 24,000 字节，输出可配置到 3,000 tokens，尊重更低显式预算，累计 token / 调用 / 工具 / 费用限制继续有效。结构及引用校验不能保证语义正确。AI 只给建议，人工变更要求批准、前提与复验；平台不执行任意 SQL、Shell、写库或邮件发送。
 
