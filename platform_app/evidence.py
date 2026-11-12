@@ -7,7 +7,7 @@ import json
 from datetime import timedelta
 from uuid import uuid4
 
-from sqlalchemy import delete, exists, func, or_, select
+from sqlalchemy import delete, exists, func, inspect, or_, select
 
 from .access import authorize
 from .common import PlatformError, fields, iso, json_safe, parse_time
@@ -31,6 +31,30 @@ def digest(value):
             json_safe(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False
         ).encode()
     ).hexdigest()
+
+
+def _persist_new_payload(db, row):
+    """Seal a new JSON payload after its database round trip, without committing.
+
+    Raw-evidence pointer items intentionally have different hash semantics:
+    their hash identifies the referenced Evidence, not their small metadata.
+    Existing rows must never be resealed by this write-only helper.
+    """
+    own_payload_types = {"metric_window", "time_series_window", "prometheus_window", "coverage"}
+    if not (
+        isinstance(row, Evidence)
+        or isinstance(row, ManifestItem) and row.item_type in own_payload_types
+    ) or not inspect(row).transient:
+        raise ValueError("Only new evidence or self-contained manifest payloads can be sealed")
+    row.payload_sha256 = digest(row.payload)
+    db.add(row)
+    db.flush()
+    # JSON storage may change a floating-point representation. Refresh only
+    # payload; the second flush must update the hash, never write payload again.
+    db.refresh(row, ["payload"])
+    row.payload_sha256 = digest(row.payload)
+    db.flush()
+    return row
 
 
 def frame_response(frame):
@@ -85,6 +109,7 @@ def append_batch(
             error_code=item.get("error_code"),
             collector=run.collector,
             interval_seconds=interval_seconds,
+            payload_hash_basis="persisted_json_v1",
         )
         payload = json_safe(item.get("payload") or {})
         row = Evidence(
@@ -112,8 +137,7 @@ def append_batch(
             truncated=item.get("truncated", False),
             expires_at=utcnow() + timedelta(days=evidence_days),
         )
-        db.add(row)
-        db.flush()
+        _persist_new_payload(db, row)
         evidence_ids.append(row.id)
         cursor = item.get("cursor")
         if cursor is not None:
@@ -328,13 +352,15 @@ def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, 
     required_ids=frozenset(required_evidence_ids)
     if len(required_ids)>10:
         raise PlatformError(422,'required_evidence_limit','必需证据数量超过限制。')
-    required_rows=list(db.scalars(select(Evidence).where(*predicates,Evidence.id.in_(required_ids)).with_for_update())) if required_ids else []
+    required_rows=list(db.scalars(select(Evidence).where(*predicates,Evidence.id.in_(required_ids)).execution_options(populate_existing=True).with_for_update())) if required_ids else []
     if {row.id for row in required_rows}!=required_ids:
         raise PlatformError(409,'demo_required_evidence_missing','固定实验依据未包含在冻结窗口中。')
     selected = {row.id:row for row in required_rows}
     evidence_total = sum(row[2] for row in groups)
     for instance_id, source, count in groups:
-        query = select(Evidence).where(*predicates, Evidence.instance_id == instance_id, Evidence.source == source)
+        # A locking query alone does not refresh existing identity-map entries.
+        # Freeze stored content, including when this session saw pre-JSON values.
+        query = select(Evidence).where(*predicates, Evidence.instance_id == instance_id, Evidence.source == source).execution_options(populate_existing=True)
         baseline = db.scalar(query.order_by(Evidence.observed_at, Evidence.id).limit(1).with_for_update())
         reserved={baseline.id:baseline} if baseline else {}
         if source=='mysql.lock_waits':
@@ -362,11 +388,18 @@ def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, 
             )
             .order_by(MetricFrame.observed_at.desc())
             .limit(1001)
+            .execution_options(populate_existing=True)
             .with_for_update()
         )
     )
     bounded_truncation = source_group_truncated or evidence_total > len(evidence) or len(frames) > 1000
     evidence, frames = evidence[:1000], frames[:1000]
+    # Preserve the pre-integrity quota decision: an unverifiable old row is a
+    # content gap, not evidence that the manifest's size bound was reached.
+    invalid_ids = {item.id for item in evidence if digest(item.payload) != item.payload_sha256}
+    if invalid_ids & required_ids:
+        raise PlatformError(409, "required_evidence_integrity_unverifiable", "必需证据的内容校验无法通过，不能建立新的冻结清单。")
+    evidence = [item for item in evidence if item.id not in invalid_ids]
     metric_coverage = frozen_metrics["coverage"]
     source_gaps = sorted(
         {
@@ -393,26 +426,17 @@ def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, 
             metric_coverage.get("reason_codes", [])
             + source_gaps
             + (["manifest_limit_reached"] if bounded_truncation else [])
+            + (["evidence_payload_checksum_unverifiable"] if invalid_ids else [])
         )
     )
     payload = {
         "instance_ids": ids,
         "window": {"from": iso(start), "to": iso(end)},
         "evidence": [{"id": e.id, "sha256": e.payload_sha256} for e in evidence],
-        "metric_frames": [
-            {"run_id": frame.run_id, "payload_sha256": digest(frame_response(frame))}
-            for frame in frames
-        ],
+        "metric_frames": [],
         "materialization": "committed_metric_frames",
         "prometheus_materialization": metric_coverage,
-        "prometheus_windows": [
-            {
-                "instance_id": item["instance_id"],
-                "template": item["template"],
-                "sha256": digest(item),
-            }
-            for item in frozen_metrics["items"]
-        ],
+        "prometheus_windows": [],
         "coverage_complete": bool(metric_coverage.get("complete")) and not gaps,
         "truncated": truncated,
         "gaps": gaps,
@@ -454,7 +478,7 @@ def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, 
         )
     for frame in frames:
         materialized = frame_response(frame)
-        db.add(
+        member = _persist_new_payload(db,
             ManifestItem(
                 manifest_id=manifest.id,
                 metric_run_id=frame.run_id,
@@ -464,8 +488,9 @@ def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, 
                 payload_sha256=digest(materialized),
             )
         )
+        payload["metric_frames"].append({"run_id": frame.run_id, "payload_sha256": member.payload_sha256})
     for item in frozen_metrics["items"]:
-        db.add(
+        member = _persist_new_payload(db,
             ManifestItem(
                 manifest_id=manifest.id,
                 instance_id=item["instance_id"],
@@ -474,7 +499,10 @@ def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, 
                 payload_sha256=digest(item),
             )
         )
-    db.add(
+        payload["prometheus_windows"].append({
+            "instance_id": item["instance_id"], "template": item["template"], "sha256": member.payload_sha256,
+        })
+    coverage = _persist_new_payload(db,
         ManifestItem(
             manifest_id=manifest.id,
             instance_id=ids[0],
@@ -483,6 +511,7 @@ def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, 
             payload_sha256=digest(payload),
         )
     )
+    manifest.manifest_sha256 = coverage.payload_sha256
     db.flush()
     return manifest
 

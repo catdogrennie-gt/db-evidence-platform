@@ -49,17 +49,20 @@ def test_numeric_snapshots_do_not_starve_available_statement_context(ai_env):
     from platform_app.common import iso
     from platform_app import models as m
     from platform_app.investigations import _bundle, create_investigation
-    from platform_app.evidence import create_manifest
+    from platform_app.evidence import create_manifest, digest
     e=ai_env; db=e['db']; original=e['evidence']
     original.source='mysql.statement_digest'
     original.payload={'rows':[{'DIGEST':'a'*64,'COUNT_STAR':12,'SUM_TIMER_WAIT':12000}]}
+    original.payload_sha256=digest(original.payload)
     for i in range(24):
-        db.add(m.Evidence(instance_id=e['a'].id,run_id=original.run_id,
+        row=m.Evidence(instance_id=e['a'].id,run_id=original.run_id,
             source='zabbix.item.numeric:'+str(i), observed_at=original.observed_at+timedelta(seconds=i+1),
             payload_sha256='0'*64,source_mode='live',coverage={'availability':'available'},
             payload={'item':{'hostid':'101','itemid':str(i),'value_type':0,'value_kind':'numeric',
                 'name':'Actual measured numeric item '+str(i),'key':'application.measured_'+str(i),
-                'units':'ms'}, 'rows':[{'time':iso(original.observed_at),'value':i+1}]}))
+                'units':'ms'}, 'rows':[{'time':iso(original.observed_at),'value':i+1}]})
+        row.payload_sha256=digest(row.payload)
+        db.add(row)
     db.commit()
     inv,_=create_investigation(e['actor'],[e['a'].id],e['start'],e['end'],'Compare measured context',mode='rules_only')
     db.flush()

@@ -460,9 +460,9 @@ def test_lock_observation_and_counterevidence_survive_initial_context_pressure(a
         ('mysql.global_status',{'rows':[{'VARIABLE_NAME':'Threads_connected','VARIABLE_VALUE':5}]}),
         ('mysql.statement_digest',{'rows':[dict({key:12345 for key in DIGEST_FIELDS},DIGEST=str(index)*64,DIGEST_TEXT='SELECT * FROM example WHERE id = ?') for index in range(8)]}),
     ]:
-        e['db'].add(m.Evidence(instance_id=e['a'].id,run_id=e['evidence'].run_id,source=source,observed_at=e['end']-timedelta(seconds=1),coverage={'availability':'available','complete':True},payload=payload,payload_sha256='a'*64))
+        e['db'].add(m.Evidence(instance_id=e['a'].id,run_id=e['evidence'].run_id,source=source,observed_at=e['end']-timedelta(seconds=1),coverage={'availability':'available','complete':True},payload=payload,payload_sha256=evidence_module.digest(payload)))
     for stamp in (e['start']+timedelta(seconds=1),e['end']-timedelta(seconds=1)):
-        e['db'].add(m.Evidence(instance_id=e['a'].id,run_id=e['evidence'].run_id,source='mysql.lock_waits',observed_at=stamp,coverage={'availability':'available','complete':True},payload={'rows':[]},payload_sha256='a'*64))
+        e['db'].add(m.Evidence(instance_id=e['a'].id,run_id=e['evidence'].run_id,source='mysql.lock_waits',observed_at=stamp,coverage={'availability':'available','complete':True},payload={'rows':[]},payload_sha256=evidence_module.digest({'rows':[]})))
     e['db'].commit()
     marker={'policy_id':p.id,'version':p.version,'signals':[{'category':'lock_wait','kind':'current','instance_id':e['a'].id,'evidence_ids':[e['evidence'].id],'calculation':{'row_count':1}}]}
     row,task,lease,config=prepared_run(e,**({'inspection':marker} if triggered else {}))

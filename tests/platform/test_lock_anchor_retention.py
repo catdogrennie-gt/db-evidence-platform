@@ -2,7 +2,7 @@
 from datetime import timedelta
 
 from platform_app import models as m
-from platform_app.evidence import create_manifest
+from platform_app.evidence import create_manifest, digest
 from platform_app.investigations import _bundle
 from tests.platform.test_ai_scope import ai_env
 
@@ -15,11 +15,12 @@ def test_first_and_latest_nonempty_lock_snapshots_survive_a_chatty_healthy_histo
         db.add(m.Evidence(instance_id=e['a'].id, run_id=e['evidence'].run_id,
             source='mysql.lock_waits', observed_at=e['start']+timedelta(seconds=1+index*6),
             payload={'rows': []}, coverage={'availability': 'available', 'complete': True},
-            payload_sha256='a'*64))
+            payload_sha256=digest({'rows': []})))
     later = m.Evidence(instance_id=e['a'].id, run_id=e['evidence'].run_id,
         source='mysql.lock_waits', observed_at=e['start']+timedelta(minutes=4),
         payload={'rows': [{'waiting_trx_id': 24, 'blocking_trx_id': 13}]},
         coverage={'availability': 'available', 'complete': True}, payload_sha256='b'*64)
+    later.payload_sha256 = digest(later.payload)
     db.add(later); db.flush()
     manifest = create_manifest(db, 'investigation', inv.id, [e['a'].id], inv.window_start, inv.window_end)
     bundle, *_ = _bundle(db, inv, manifest)

@@ -4,12 +4,13 @@ from datetime import datetime
 import json
 
 from platform_app.models import Evidence
+from platform_app.evidence import digest
 from platform_app.model_context import refresh_snapshot_chronology
 from platform_app.tools import project_evidence
 
 
 def observation(ref, source_id, *, hostid='101', itemid='11', count=1):
-    return Evidence(id=ref, instance_id='aggregate', source='mysql.lock_waits',
+    row = Evidence(id=ref, instance_id='aggregate', source='mysql.lock_waits',
         source_mode='live', observed_at=datetime(2026, 11, 12, 18, 0, 0),
         payload={'item': {'hostid': hostid, 'itemid': itemid,
                          'name': 'Lock snapshot', 'password': 'PRIVATE-PASSWORD'},
@@ -17,6 +18,8 @@ def observation(ref, source_id, *, hostid='101', itemid='11', count=1):
         coverage={'source_id': source_id, 'hostid': hostid, 'itemid': itemid,
                   'availability': 'available', 'complete': True,
                   'password': 'PRIVATE-KEY'}, payload_sha256='a' * 64)
+    row.payload_sha256 = digest(row.payload)
+    return row
 
 
 def test_projection_exposes_only_safe_source_qualified_identity_and_does_not_modify_raw():

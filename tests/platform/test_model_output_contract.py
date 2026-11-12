@@ -4,6 +4,7 @@ import json
 import pytest
 
 from platform_app.common import iso
+from platform_app.evidence import digest
 from tests.platform.test_ai_scope import ai_env
 from tests.platform.test_ai_failures import prepared_run, provider_response
 
@@ -16,6 +17,7 @@ def numeric_evidence(env):
         'value_type': 0, 'units': 'ms', 'value_semantics': 'gauge',
         'semantics_source': 'zabbix_tag', 'tags': []},
         'rows': [{'time': iso(row.observed_at), 'value': 12}]}
+    row.payload_sha256 = digest(row.payload)
     env['db'].commit()
     return row.id
 

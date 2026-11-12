@@ -89,6 +89,8 @@ def observe(
         },
         payload_sha256="a" * 64,
     )
+    from platform_app.evidence import digest
+    e.payload_sha256 = digest(e.payload)
     db.add(e)
     db.flush()
     return run, e

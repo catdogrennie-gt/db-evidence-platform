@@ -6,7 +6,7 @@ from fastapi import HTTPException
 from tests.platform.test_events import db, graph, manual_event, observe
 from platform_app import models as m
 from platform_app.db import utcnow
-from platform_app.evidence import create_manifest
+from platform_app.evidence import create_manifest, digest
 
 
 def test_manifest_checks_all_sources_owner_permission_and_revocation(db):
@@ -41,6 +41,8 @@ def test_manifest_only_returns_bounded_safe_references_not_restricted_payload(db
     _, item = observe(db, a, now - timedelta(seconds=10))
     item.sensitivity = "restricted"
     item.payload = {"sql_text": "do-not-project-private-marker"}
+    item.payload_sha256 = digest(item.payload)
+    db.flush()
     manifest = create_manifest(db, "event", event.id, [a.id], now - timedelta(minutes=1), now)
     response = manifest_detail(manifest.id, limit=1, actor=actor)
     assert len(response["items"]) == 1 and response["total"] == 2 and response["next_cursor"] == "1"

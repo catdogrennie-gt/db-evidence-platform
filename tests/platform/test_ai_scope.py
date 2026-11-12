@@ -90,6 +90,9 @@ def ai_env(tmp_path):
         payload={"rows": [{"waiting_trx_id": 99}]},
         payload_sha256="1" * 64,
     )
+    from platform_app.evidence import digest
+    evidence.payload_sha256 = digest(evidence.payload)
+    late.payload_sha256 = digest(late.payload)
     investigation = Investigation(
         created_by=user.id,
         question="why lock?",

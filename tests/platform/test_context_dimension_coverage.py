@@ -7,6 +7,7 @@ import json
 import pytest
 
 from platform_app.common import iso
+from platform_app.evidence import digest
 from platform_app.model_context import compact_initial, compact_numeric_evidence, refresh_snapshot_chronology
 from tests.platform.test_ai_scope import ai_env
 from tests.platform.test_ai_failures import prepared_run, provider_response
@@ -282,6 +283,7 @@ def seed_dimensions(e, monkeypatch, frozen_payloads=None):
     from platform_app import models as m, evidence as evidence_module
     db=e['db']; baseline=e['evidence']; baseline.source='mysql.statement_digest'
     baseline.payload={'rows':[{'DIGEST':'a'*64, 'COUNT_STAR':12, 'SUM_TIMER_WAIT':12000}]}
+    baseline.payload_sha256=digest(baseline.payload)
     refs=[]
     for index in range(6):
         points=[{'time':iso(e['start']+timedelta(seconds=5*i)),
@@ -290,8 +292,9 @@ def seed_dimensions(e, monkeypatch, frozen_payloads=None):
             source='zabbix.item.numeric:'+hashlib.sha256(
                 f"selected-monitor:{101+index%2}:{700+index}".encode()).hexdigest()[:24],
             observed_at=e['start']+timedelta(seconds=495),
-            coverage={'availability':'available','complete':True}, payload_sha256='0'*64,
+            coverage={'availability':'available','complete':True},
             source_mode='live', payload={'item':measured_item(index),'rows':points})
+        row.payload_sha256=digest(row.payload)
         db.add(row);db.flush();refs.append(row.id)
     db.commit()
     original=evidence_module.create_manifest
@@ -362,6 +365,7 @@ def test_bundle_clips_trigger_history_before_its_first_numeric_compaction(ai_env
         {'time':iso(e['start']+timedelta(seconds=5)),'value':3},
         {'time':iso(e['end']),'value':901},
         {'time':iso(e['end']+timedelta(seconds=5)),'value':902}])
+    row.payload_sha256=digest(row.payload)
     e['db'].commit();before=(copy.deepcopy(row.payload),copy.deepcopy(row.coverage),row.payload_sha256)
     inv,_,_,_=prepared_run(e,inspection={'signals':signals(e,refs)})
     manifest=create_manifest(e['db'],'investigation',inv.id,[e['a'].id],e['start'],e['end'])

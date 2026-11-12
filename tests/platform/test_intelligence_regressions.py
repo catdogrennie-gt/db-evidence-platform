@@ -8,6 +8,7 @@ from tests.platform.test_ai_scope import ai_env
 from tests.platform.test_intelligence import policy_env
 from platform_app import models as m
 from platform_app.common import iso
+from platform_app.evidence import digest
 from platform_app.db import utcnow, create_session_factory
 
 
@@ -164,6 +165,7 @@ def test_explicit_structured_finding_creates_unverified_result_without_threshold
 def test_sql_findings_require_actual_distinct_frozen_digest_dimensions(ai_env):
     e=ai_env
     evidence=m.Evidence(instance_id=e['a'].id,run_id=e['evidence'].run_id,source='mysql.statement_digest',observed_at=e['start'],coverage={'availability':'available','complete':True},payload={'rows':[{'DIGEST':'a'*64},{'DIGEST':'b'*64}]},payload_sha256='c'*64)
+    evidence.payload_sha256=digest(evidence.payload)
     e['db'].add(evidence);e['db'].flush()
     valid=[proposal(e,category='sql',dimension={'kind':'sql_digest','value':value*64},refs=[evidence.id]) for value in ('a','b')]
     absent=proposal(e,category='sql',dimension={'kind':'sql_digest','value':'c'*64},refs=[evidence.id])
@@ -269,7 +271,7 @@ def test_periodic_bundle_preserves_transient_lock_and_latest_counterevidence(ai_
     e=ai_env;inv=e['investigation']
     e['db'].add(m.InvestigationResource(investigation_id=inv.id,instance_id=e['a'].id))
     for index in range(80):
-        e['db'].add(m.Evidence(instance_id=e['a'].id,run_id=e['evidence'].run_id,source='mysql.lock_waits',observed_at=e['start']+timedelta(seconds=1+index*6),payload={'rows':[]},coverage={'availability':'available','complete':True},payload_sha256='a'*64))
+        e['db'].add(m.Evidence(instance_id=e['a'].id,run_id=e['evidence'].run_id,source='mysql.lock_waits',observed_at=e['start']+timedelta(seconds=1+index*6),payload={'rows':[]},coverage={'availability':'available','complete':True},payload_sha256=digest({'rows':[]})))
     e['db'].flush()
     manifest=create_manifest(e['db'],'investigation',inv.id,[e['a'].id],inv.window_start,inv.window_end)
     bundle,*_=_bundle(e['db'],inv,manifest)
@@ -321,6 +323,7 @@ def test_sql_explanation_dedupes_only_same_normalized_digest(ai_env):
     from platform_app.intelligence import upsert_finding
     e=ai_env
     evidence=m.Evidence(instance_id=e['a'].id,run_id=e['evidence'].run_id,source='mysql.statement_digest',observed_at=e['start'],coverage={'availability':'available','complete':True},payload={'rows':[{'DIGEST':'a'*64},{'DIGEST':'b'*64}]},payload_sha256='c'*64)
+    evidence.payload_sha256=digest(evidence.payload)
     e['db'].add(evidence);e['db'].flush()
     original=upsert_finding(e['db'],e['a'].id,'sql_latency','A'*64,[evidence.id],{'avg_latency_seconds':.75,'count_delta':15},now=evidence.observed_at)
     e['db'].commit()
@@ -338,6 +341,7 @@ def test_reverse_completion_keeps_new_model_finding_content_and_refs(ai_env):
     e=ai_env;p=policy_env(e);p.mode='live_redacted';p.external_confirmed=True
     e['evidence'].coverage={'availability':'available','complete':True}
     now=utcnow();new=m.Evidence(instance_id=e['a'].id,run_id=e['evidence'].run_id,source='mysql.lock_waits',observed_at=now-timedelta(minutes=2),coverage={'availability':'available','complete':True},payload={'rows':[{'waiting_trx_id':21,'blocking_trx_id':22}]},payload_sha256='a'*64)
+    new.payload_sha256=digest(new.payload)
     e['db'].add(new);e['db'].flush()
     investigations=[]
     for index,(minutes,label,reference) in enumerate([(5,'OLD',e['evidence'].id),(1,'NEW',new.id)]):
@@ -365,6 +369,8 @@ def test_manifest_budget_preserves_middle_lock_before_projection(ai_env):
     e=ai_env;inv=e['investigation'];start=utcnow()-timedelta(hours=1)
     inv.window_start=start;inv.window_end=start+timedelta(hours=1)
     e['evidence'].payload={'rows':[]};e['late'].payload={'rows':[]}
+    e['evidence'].payload_sha256=digest(e['evidence'].payload)
+    e['late'].payload_sha256=digest(e['late'].payload)
     objects=[e['a'],e['b']]
     for index in range(3):
         obj=m.Instance(system_id=e['system'].id,name='budget-'+str(index),endpoint='fixture.invalid',expected_server_uuid='budget-'+str(index))
@@ -378,6 +384,7 @@ def test_manifest_budget_preserves_middle_lock_before_projection(ai_env):
             for minute in range(60):
                 abnormal=obj.id==e['a'].id and source=='mysql.lock_waits' and minute==8
                 row=m.Evidence(instance_id=obj.id,run_id=run.id,source=source,observed_at=start+timedelta(minutes=minute),coverage={'availability':'available','complete':True},payload={'rows':[{'waiting_trx_id':21,'blocking_trx_id':22}] if abnormal else []},payload_sha256='a'*64)
+                row.payload_sha256=digest(row.payload)
                 e['db'].add(row)
                 if abnormal: positive=row
     e['db'].flush()
