@@ -364,10 +364,13 @@ def project_evidence(row: Evidence) -> dict:
         }
     else:
         data["payload_omitted"] = True
+    coverage = row.coverage if isinstance(row.coverage, dict) else {}
     if isinstance(payload.get('item'),dict):
         from .zabbix_items import safe_item
         data['item']=safe_item(payload['item'])
-    coverage = row.coverage if isinstance(row.coverage, dict) else {}
+        source_id=coverage.get('source_id')
+        if isinstance(source_id,str) and re.fullmatch(r'[A-Za-z0-9_.:-]{1,80}',source_id):
+            data['item']['source_id']=source_id
     availability = code(coverage.get("availability"))
     if availability not in ("available", "degraded", "unknown"):
         data = {"observation_unavailable": True}

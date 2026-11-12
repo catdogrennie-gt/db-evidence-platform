@@ -694,7 +694,7 @@ def test_demo_worker_policy_filtered_proof_never_calls_model(demo_env):
     c.close()
 
 
-def test_demo_worker_context_trimmed_proof_never_calls_model(demo_env, monkeypatch):
+def test_demo_worker_oversized_required_proof_never_calls_model(demo_env, monkeypatch):
     from platform_app.investigations import run_investigation
     from platform_app import model_context
 
@@ -719,7 +719,9 @@ def test_demo_worker_context_trimmed_proof_never_calls_model(demo_env, monkeypat
     report = e["db"].get(m.Investigation, r.investigation_id)
     assert (
         report.status == "failed"
-        and report.report["error_code"] == "demo_required_evidence_missing"
+        # Required proof remains protected. An impossible budget must fail
+        # before sending anything, rather than silently deleting that proof.
+        and report.report["error_code"] == "model_token_budget_exhausted"
     )
     c.close()
 

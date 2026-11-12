@@ -42,7 +42,7 @@ from .report_summary import ExecutiveSummary
 from .scheduling import check_fence, complete, enqueue, fail
 from .tools import ToolBroker, project_evidence, tool_definitions, TOOL_SOURCES
 
-PROMPT_VERSION = "evidence-investigation-v4.3"
+PROMPT_VERSION = "evidence-investigation-v4.4"
 SAFE_COLLECTORS = frozenset(
     {
         "identity_status",
@@ -77,7 +77,7 @@ signal_calculation_columns对应inspection_signals.calculation数组，点号为
 phenomenon/joint_root_cause/conclusion必须是单个Claim对象，不能是字符串/数组/null；surface_causes为Claim数组，recommended_actions为Action数组，headline为字符串。示例仅说明形状，须重写内容并用实际ID替换<provided-reference>；不足时说明限制、数组可空，仍须包含全部顶层字段。
 已知MySQL来源边界：data_lock_waits本身提供等待/阻塞关系标识，不直接提供SQL文本或LOCK_TYPE/LOCK_MODE；LOCK_TYPE/LOCK_MODE来自data_locks关联，SQL文本需threads与events_statements关联（threads提供会话身份，events_statements_current/history提供可能保留的语句）。已有投影行的requested_lock_type/requested_lock_mode、未归属的LOCK_TYPE/LOCK_MODE与schema_ref/table_ref等别名是可用结构证据，应按角色实际解读，不要误说未提供；别名不泄露原对象名。缺字段时仅建议人工按关联表只读核对及说明采样/权限/历史保留前提，不可声称单读data_lock_waits即可取得全部字段，也不生成SQL或执行工具。当前语句不一定是持锁语句，没有历史映射仍不能归属具体SQL。
 有主机数值时必须按resource/host评估支持、反证或证据不足，在原因或结论引用代表数值，不逐条复述曲线。区分主机/实例和时间/缺口，正常样本不排除未采瞬时问题；注册关系/同时出现不证明因果。时刻必须显式UTC或Z，保留输入时区，不自行换算本地时区。
-snapshot_chronology是平台从本轮实际保留投影按时区归一生成的样本时间关系，不是诊断。各组隔离instance/source/template和已知host/item，缺身份不能猜合并。first_nonempty/last_nonempty仅非空锚点；empty_before_first/empty_after_last分别严格早于/晚于锚点，empty_at_nonempty_time不算前后，empty_between仅两个非空锚点之间；count只统计本轮保留样本，引用可能限额并有refs_omitted，groups_omitted/invalid_time_count代表缺口。empty_after_last.count=0明确表示未提供同组后续空样本，不能声称前后均空、恢复或瞬时；一个非空加全部更早空，无法确定持续时间，也不能推断当前仍等待。工具结果的时间关系仅覆盖该次结果。所有叙述须符合实际时间与组边界。
+snapshot_chronology是平台从本轮实际保留投影按时区归一生成的样本时间关系，不是诊断。按instance/source/template及已知source_id/host/item隔离，缺身份不猜合并。first_nonempty/last_nonempty为非空锚点；empty_before_first/empty_after_last严格早于/晚于锚点，同刻空样本归empty_at_nonempty_time而非前后，empty_between仅两锚点之间。count仅为本轮保留样本数，不等于事故次数或全窗覆盖，不外推全窗仅一次。refs_omitted表示部分引用未列出，不把无引用具体时刻并入同句；groups_omitted/invalid_time_count是缺口。empty_after_last.count=0表示无同组后续空样本，不得声称前后均空、恢复或瞬时；非空及全部更早空不能确定持续时间或当前仍等待。工具时间关系仅限该次结果，叙述须符合时间与组边界。
 surface_causes尽量说明各层可证实的直接机理及支持/反证，不要仅重复时间列表充作原因。RECORD等待链可解释为事务记录锁竞争的表层机制，但为什么长持锁、哪段SQL或业务起因仍需独立证据，不能从等待链臆断，也不能在未测时长时声称长持锁。
 锁角色与时长必须遵守可信采集契约：经REQUESTING_ENGINE_LOCK_ID关联的LOCK_MODE属于请求侧，不是阻塞侧已持锁模式；本仓库官方扩展和传统直采的该join均为请求侧。除非提供独立blocking_lock_mode及其来源，不得称阻塞事务持有投影LOCK_MODE所示模式。任意自定义来源不能只凭字段名猜角色，契约未明时须说明未知。data_locks/data_lock_waits没有持锁开始时间或持锁时长，不得建议仅join这两表就能取得持锁时长；事务开始时间/事务年龄不等于锁获取时间/持锁时长，单快照与无后续样本也不确定持续时间。没有显式相关时间字段或有界重复观测时，持锁/等待持续时长仍未知。
 ID命名不是命名空间证明：本仓库官方扩展的waiting_thread_id/blocking_thread_id实际为threads.PROCESSLIST_ID；传统直采查询同名字段可来自P_S.THREAD_ID，不能混用。PROCESSLIST_ID不能直接当作P_S.THREAD_ID；事务ID也独立。人工关联threads/events_statements前须核对可信来源契约并经threads映射正确ID，来源或映射缺失则保持未知，不用数值相同代替关联证据。不向任意自定义item强加官方扩展的ID语义，不生成SQL或执行新工具。
@@ -496,13 +496,19 @@ def _bundle(db, investigation, manifest, policies=None):
     # Round-robin source/asset layers, preserving both latest and baseline samples.
     buckets = {}
     for row in db.scalars(select(Evidence).where(Evidence.id.in_(evidence_ids), Evidence.observed_at >= investigation.window_start, Evidence.observed_at < investigation.window_end).order_by(Evidence.observed_at.desc(), Evidence.id).limit(1000)):
-        buckets.setdefault((row.instance_id, row.source), []).append(row)
+        metadata=(row.payload or {}).get('item')
+        metadata=metadata if isinstance(metadata,dict) else {}
+        source_id=(row.coverage or {}).get('source_id')
+        identity=tuple(value if isinstance(value,str) else None
+                       for value in (source_id,metadata.get('hostid'),metadata.get('itemid')))
+        buckets.setdefault((row.instance_id, row.source, *identity), []).append(row)
     candidates = []
     representatives=set()
     for rows in buckets.values():
-        abnormal=next((row for row in rows if row.source=='mysql.lock_waits' and isinstance((row.payload or {}).get('rows'),list) and any(isinstance(v,dict) and v for v in row.payload['rows']) and (row.coverage or {}).get('availability','unknown') in ('available','unknown','degraded')),None)
+        abnormal=[row for row in rows if row.source=='mysql.lock_waits' and isinstance((row.payload or {}).get('rows'),list) and any(isinstance(v,dict) and v for v in row.payload['rows']) and (row.coverage or {}).get('availability','unknown') in ('available','unknown','degraded')]
         if abnormal:
-            candidates.append(abnormal);representatives.add(abnormal.id)
+            for anchor in (abnormal[0],abnormal[-1]):
+                candidates.append(anchor);representatives.add(anchor.id)
     for rows in buckets.values():
         candidates.append(rows[0])
     for rows in buckets.values():
@@ -531,9 +537,14 @@ def _bundle(db, investigation, manifest, policies=None):
         # for SQL/log/lock context. The complete model request remains subject
         # to the unchanged 24k/32k limits below.
         allowance=6500 if row.source.startswith('zabbix.item.numeric:') else 9000
-        if len(json.dumps(items + [projected], ensure_ascii=False).encode()) > allowance: continue
+        if (len(json.dumps(items + [projected], ensure_ascii=False).encode()) > allowance
+                and row.id not in representatives and row.id not in trigger_ids): continue
         items.append(projected)
         used_ids.add(row.id)
+    if not (representatives | (trigger_ids & evidence_ids)).issubset(used_ids):
+        # Local display limits cannot silently turn a protected fact into a
+        # clean-looking partial window. The final request guard owns the budget.
+        raise PlatformError(409,'model_token_budget_exhausted','必要依据超出上下文范围，未发送不完整模型输入。')
     # Frozen numeric summaries supply both normal and anomalous signal context.
     for metric,payload,values in numeric_windows:
         # The human/rules bundle keeps the familiar item projection; the model
@@ -1027,14 +1038,14 @@ def _run_live(
     )
     # Keep the hard 24k per-round bound, including repeated tool schemas and JSON
     # string escaping. Prioritize actual lock edges before trimming initial data.
-    from .model_context import compact_initial,context_refs,bounded_tool_result,refresh_snapshot_chronology,prepare_tool_context,trim_numeric_summary,compact_final_context
+    from .model_context import compact_initial,context_refs,bounded_tool_result,refresh_snapshot_chronology,prepare_tool_context,trim_numeric_summary,compact_final_context,snapshot_identity
     initial = compact_initial(bundle)
     messages[0]['content'] = _system_prompt_for_sources(available_sources,context=initial)
     trigger_ids={ref for signal in initial.get('inspection_signals',[]) for ref in signal.get('evidence_ids',[])} | set(required_ids)
-    abnormal_layers={(item.get('instance_id'),item.get('source')) for item in initial['evidence'] if item.get('selection_reason')=='nonempty_lock_snapshot'}
+    abnormal_layers={snapshot_identity(item) for item in initial['evidence'] if item.get('selection_reason')=='nonempty_lock_snapshot'}
     latest_by_layer={}
     for item in initial['evidence']:
-        layer=(item.get('instance_id'),item.get('source'))
+        layer=snapshot_identity(item)
         if layer in abnormal_layers and (layer not in latest_by_layer or item.get('observed_at','')>latest_by_layer[layer].get('observed_at','')): latest_by_layer[layer]=item
     latest_ids={item['evidence_id'] for item in latest_by_layer.values()}
     representative_ids=set();seen_layers=set()
@@ -1042,7 +1053,7 @@ def _run_live(
         if 'numeric_observation' in item or str(item.get('source','')).startswith('zabbix.item.numeric:'):continue
         data=item.get('data') or {}
         if data.get('observation_unavailable') or data.get('text_omitted'):continue
-        layer=(item.get('instance_id'),item.get('source'))
+        layer=snapshot_identity(item)
         if layer not in seen_layers:
             seen_layers.add(layer);representative_ids.add(item['evidence_id'])
     protected_ids=trigger_ids | latest_ids | representative_ids | {item['evidence_id'] for item in initial['evidence'] if item.get('selection_reason')=='nonempty_lock_snapshot'}
@@ -1075,11 +1086,9 @@ def _run_live(
         elif (initial.get('numeric_series') or {}).get('rows'):
             series=initial['numeric_series']; rows=series['rows']
             if len(rows)<=1:
-                if initial['evidence']: initial['evidence'].pop()
-                else: break
-                continue
+                break
             trim_numeric_summary(initial)
-        elif initial['evidence']: initial['evidence'].pop()
+        else: break
     _prune_inspection_signals(initial)
     initial['coverage']['retained_evidence_count']=len(initial['evidence'])
     refresh_snapshot_chronology(initial,sort=True)

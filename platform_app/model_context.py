@@ -94,6 +94,13 @@ def _snapshot_time(item):
         return None
 
 
+def snapshot_identity(item):
+    data=item.get('data') or {}
+    meta=data.get('item') or {}
+    return (item.get('instance_id'),item.get('source'),item.get('template',data.get('metric')),
+            meta.get('source_id'),meta.get('hostid'),meta.get('itemid'))
+
+
 def refresh_snapshot_chronology(container, *, item_key='evidence', sort=False):
     """Recompute only from the supplied projection; never infer a diagnosis."""
     rows = container.get(item_key, [])
@@ -112,10 +119,8 @@ def refresh_snapshot_chronology(container, *, item_key='evidence', sort=False):
         if stamp is None:
             invalid += 1
             continue
-        meta = data.get('item') or {}
         # Missing identity stays a separate group; never guess from display names.
-        template = item.get('template', data.get('metric'))
-        identity = (item['instance_id'], item['source'], template, meta.get('hostid'), meta.get('itemid'))
+        identity = snapshot_identity(item)
         if any(value is not None and not isinstance(value, str) for value in identity): continue
         buckets.setdefault(identity, []).append((stamp, item['evidence_id'], count))
     groups = []
@@ -130,7 +135,7 @@ def refresh_snapshot_chronology(container, *, item_key='evidence', sort=False):
         empty = [row for row in samples if row[2] == 0]
         anchors = {row[0] for row in nonempty}
         first, last = (nonempty[0], nonempty[-1]) if nonempty else (None,None)
-        groups.append(dict(zip(('instance_id','source','template','hostid','itemid'),identity),
+        groups.append(dict(zip(('instance_id','source','template','source_id','hostid','itemid'),identity),
             sample_count=len(samples), first_nonempty=reference(first) if first else None,
             last_nonempty=reference(last) if last else None,
             empty_before_first=empty_summary([r for r in empty if first and r[0] < first[0]]),
@@ -139,7 +144,7 @@ def refresh_snapshot_chronology(container, *, item_key='evidence', sort=False):
             empty_between=empty_summary([r for r in empty if first and first[0] < r[0] < last[0] and r[0] not in anchors]),
             empty_without_nonempty_anchor=empty_summary(empty if not nonempty else [])))
     # Spend the small chronology allowance on groups with actual nonempty rows.
-    groups.sort(key=lambda g:(g['first_nonempty'] is None,-g['sample_count'],g['instance_id'],g['source'],g['template'] or '',g['hostid'] or '',g['itemid'] or ''))
+    groups.sort(key=lambda g:(g['first_nonempty'] is None,-g['sample_count'],g['instance_id'],g['source'],g['template'] or '',g['source_id'] or '',g['hostid'] or '',g['itemid'] or ''))
     container.pop('snapshot_chronology', None)
     container.pop('snapshot_chronology_omitted', None)
     if groups or invalid:
@@ -317,7 +322,7 @@ def compact_initial(bundle):
         data=item.get('data') or {};meta=data.get('item')
         if isinstance(meta,dict):
             data['item']={key:value for key,value in meta.items() if key in (
-                'hostid','itemid','name','key','units','value_semantics','semantics_source',
+                'source_id','hostid','itemid','name','key','units','value_semantics','semantics_source',
                 'interval','interval_verified','history_semantics')}
     trigger_refs={ref for signal in initial.get('inspection_signals',[]) for ref in signal.get('evidence_ids',[])}
     initial['evidence']=[item for item in original if item['evidence_id'] in trigger_refs or (item['evidence_id'] not in refs and not (str(item.get('source','')).startswith('zabbix.item.numeric:') and (item.get('instance_id'),item.get('source'),(item.get('data') or {}).get('item',{}).get('hostid'),(item.get('data') or {}).get('item',{}).get('itemid')) in identities))]
@@ -356,7 +361,7 @@ def compact_tool_item(item):
         if numeric_subset:
             result['data'].update({k:data[k] for k in ('sample_count','first_time','last_time','projection_scope') if k in data})
         if isinstance(data.get('item'),dict):
-            metadata=('hostid','itemid','units','value_semantics','semantics_source') if numeric_subset else ('hostid','itemid')
+            metadata=('source_id','hostid','itemid','units','value_semantics','semantics_source') if numeric_subset else ('source_id','hostid','itemid')
             result['data']['item']={k:v for k,v in data['item'].items() if k in metadata and isinstance(v,str)}
         if isinstance(data.get('rows'),list):
             result['data']['rows']=data['rows'][:2]
@@ -446,7 +451,7 @@ def compact_final_context(initial, *, max_bytes, measure, protected_evidence_ids
         if str(item.get('source','')).startswith('zabbix.item.numeric:'):continue
         data=item.get('data') or {};meta=data.get('item') or {}
         if data.get('observation_unavailable') or data.get('text_omitted'):continue
-        identity=(item.get('instance_id'),item.get('source'),item.get('template'),meta.get('hostid'),meta.get('itemid'))
+        identity=snapshot_identity(item)
         layers.setdefault(identity,[]).append(item)
         if item.get('selection_reason')=='nonempty_lock_snapshot':protected.add(item['evidence_id'])
     for items in layers.values():
@@ -496,6 +501,15 @@ def compact_final_context(initial, *, max_bytes, measure, protected_evidence_ids
         series['rows']=[[value for i,value in enumerate(row) if i not in positions] for row in series.get('rows',[])]
 
     thin_points(2)
+    # Snapshot display labels and polling settings are redundant in a final
+    # bounded request. Keep source-qualified identity and interpretation fields
+    # before sacrificing any independent measured dimension or actual lock edge.
+    for item in working.get('evidence',[]):
+        if str(item.get('source','')).startswith('zabbix.item.numeric:'):continue
+        meta=(item.get('data') or {}).get('item')
+        if isinstance(meta,dict):
+            for name in ('name','key','interval','interval_verified','history_semantics'):
+                meta.pop(name,None)
     result=packed()
     if measure(result)<=max_bytes:return result
     omit_series_columns({'key','sampling_method'})

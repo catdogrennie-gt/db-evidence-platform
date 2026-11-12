@@ -173,3 +173,16 @@ node frontend/scripts/check-connection-contracts.cjs
 部署使用同一不可变版本 07，按 AI 校验进程 → 采集调度进程的顺序交接；排期按原值恢复，无冲突。公开入口 52 项检查（含 7 项拒写）通过。新场景的自动发现和模型报告仍需另行验证，不用部署成功代替诊断验收。
 
 复现入口：`python -m pytest tests/platform/test_inspection_selection_scope.py tests/platform/test_inspection_selection_dispatch.py -q`。完整回归使用 `python -m pytest tests/platform -q`；需要 Caddy 集成时先将 `RELEASE_GATEWAY_CADDY` 指向已核实的本机可执行文件。真实环境对照脚本与包含私密配置的原始结果保存在仓库外。
+
+## 8. 保留快照的范围与来源（FR-022～025 / AT-013 补充）
+
+状态：**已实现并完成程序、真实历史输入及单次模型采样范围专项验收；完整诊断质量仍未通过**。
+
+- 初始选择优先保留同来源最早和最新的非空锁快照；所有压缩路径保留来源身份，独立来源的空采样不能充作另一来源的恢复。
+- 局部展示限制及最终预算不能静默丢失关键依据。重复名称与采样设置先精简；实际数据和必要引用无法容纳时，调用模型前明确失败。
+- 完整后端 **1096 passed、10 skipped、6 subtests**；156 项定向检查包含多来源身份、关键锚点、外发过滤、工具累积预算及无法容纳时不发送。独立审查无未解决阻断问题，失败和首次 RED 保存在仓库外。
+- 实际历史恢复窗口的生产请求组装在隔离库中重放，输入预留边界为 **23637/24000**，含输出预留为 **27637/32000**。两份非空快照及前后空采样保留，原始/冻结/旧报告/调用审计内容哈希不变。未调用真实供应商，不能将此项写成模型诊断通过。
+
+复现入口：`python -m pytest tests/platform/test_lock_anchor_retention.py tests/platform/test_snapshot_source_identity.py tests/platform/test_snapshot_compaction_identity.py tests/platform/test_reasoning_evidence_contract.py -q`。对应计划见[采样范围改进](../superpowers/plans/2026-11-13-retained-snapshot-scope.md)。
+
+一次标准 API 历史复核实际调用 DeepSeek 一轮（5711 输入、1569 输出 token），保留并正确区分两份非空快照，不再外推全窗仅一次；原始证据及旧记录不变。本次是手工历史对照，不计为新的自主发现。报告仍将后续空采样归为“自行恢复”，并混用数值点与快照计数、缺少直接引用，故整份诊断不标通过，公开故障页继续关闭。
