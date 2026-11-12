@@ -220,5 +220,6 @@ node frontend/scripts/check-connection-contracts.cjs
 - 完整后端 **1144 passed、25 skipped、6 subtests**；实际 MySQL 的 4 项 opt-in 测试已另行执行通过，不能将默认跳过计作真实数据库验证。旧有效 fixture 的占位哈希改为实际摘要，不放宽断言。独立复核无 P0/P1；前端未改，本轮未重复构建或声称视觉验收。
 - 09 分析与采集后台依次通过唯一进程及两次心跳检查，10 行排期、11 个时间字段还原无冲突。自然新采集 40 条证据在明确只读事务中复核，哈希全部相符；3180 个浮点样本保留 `raw_value`，其中 80 个读回表示与原字符串解析不同，仍能重算封存哈希。
 - 公网在 2026-11-12 22:10:19～22:10:32 UTC 切至 09，26 项公开主链检查及随后 17 项三站门通过：原报告与冻结事实、当前问题和图表保持一致，访客拒写、旧资源可读。保留 08 回退并同步启动配置，未做电脑重启验证；不能据此承诺整个公网期间无中断。
+- 上线后原有周期自然生成一份新报告及清单，未人为触发任务。明确只读事务逐一重算 **909 条原始引用、6 个自含成员**，原始/成员/覆盖清单哈希及成员间引用全部相符。原有历史返回预算和来源缺口仍使覆盖不完整，没有把缺口改成完整或健康。后台这次实际模型调用为 3481 输入、1006 输出 token；仅验证存储与引用链，不把报告完成当作模型语义通过。
 
-复现：`python -m pytest tests/platform/test_persisted_json_integrity.py -q`。真实 MySQL 需以本机私密配置路径设置 `DBE_TEST_MYSQL_CONFIG`，禁止把配置内容放入命令输出或仓库。参见[设计](../superpowers/specs/2026-11-13-persisted-json-integrity-design.md)与[计划](../superpowers/plans/2026-11-13-persisted-json-integrity.md)。本轮不调用模型、不改额度、不开放 A，不代表新的故障诊断通过。
+复现：`python -m pytest tests/platform/test_persisted_json_integrity.py -q`。真实 MySQL 需以本机私密配置路径设置 `DBE_TEST_MYSQL_CONFIG`，禁止把配置内容放入命令输出或仓库。参见[设计](../superpowers/specs/2026-11-13-persisted-json-integrity-design.md)与[计划](../superpowers/plans/2026-11-13-persisted-json-integrity.md)。本轮未手动派发分析或追加模型调用，不改额度、不开放 A；原有后台周期继续运行，不代表新的故障诊断通过。
