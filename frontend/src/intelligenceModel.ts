@@ -73,7 +73,33 @@ export interface EvidenceEdge {
   evidence_ids: string[];
   provenance?: string;
 }
+export interface FrozenRuleFact {
+  kind: 'capacity_pressure';
+  instance_id: string;
+  title: string;
+  statement: string;
+  observed_at: string;
+  evidence_ids: string[];
+  calculation: {
+    used: number;
+    limit: number;
+    utilization_percent: number;
+    remaining: number;
+    warning_percent: number;
+    unit: string;
+    sample_count: number;
+    time_pairs: Array<{
+      used_at: string;
+      limit_at: string;
+      used: number;
+      limit: number;
+      remaining: number;
+      utilization_percent: number;
+    }>;
+  };
+}
 export interface IssueDetail extends Issue {
+  frozen_facts?: FrozenRuleFact[];
   report_status?: string;
   window: { from: string; to: string } | null;
   report: Row | null;

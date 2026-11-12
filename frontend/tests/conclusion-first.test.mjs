@@ -18,7 +18,7 @@ const base = { report: { executive_summary: summary }, nodes: [], edges: [], cha
 test('real summary exposes nested references, limitations and manual action controls', () => {
   assert.equal(typeof ui.ExecutiveSummary, 'function');
   const html = render(ui.ExecutiveSummary, { report: base.report });
-  for (const value of ['发生了什么', '各层原因', '联合根因候选', '问题结论', '建议操作', '请求变慢', '证据不足', '尚缺并发对照', '高风险', '需要人工批准', '确认负载', '复查等待', `/evidence/${id}`, '反证引用']) assert.ok(html.includes(value), value);
+  for (const value of ['发生了什么', '各层原因', '联合根因候选', 'AI判断', '建议操作', '请求变慢', '证据不足', '尚缺并发对照', '高风险', '需要人工批准', '确认负载', '复查等待', `/evidence/${id}`, '反证引用']) assert.ok(html.includes(value), value);
 });
 test('normal inspection accepts no applicable root cause and no action', () => {
   assert.equal(typeof ui.ExecutiveSummary, 'function');

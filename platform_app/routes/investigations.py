@@ -178,7 +178,7 @@ def list_investigations(
         actor.db, query, Investigation, limit=limit, cursor=cursor
     )
     return {
-        "items": [investigation_detail(actor, row, include_audit=False) for row in rows],
+        "items": [investigation_detail(actor, row, include_audit=False, include_facts=False) for row in rows],
         "total": total,
         "next_cursor": next_cursor,
     }

@@ -8,6 +8,8 @@ import { ContextLink, FieldGrid, LoadState, RecordCard, SourceCoverage, Status, 
 import { Evidence } from './Workflow';
 import { InvestigationReportView, ManifestButton, VerificationReportView, EventSummaryView } from './Presentation';
 import { ExecutiveSummary } from './ExecutiveSummary';
+import { FrozenRuleFacts } from './FrozenRuleFacts';
+import type { FrozenRuleFact } from './intelligenceModel';
 import { FrozenMetricDrawer } from './Intelligence';
 
 export function RetiredPage() {
@@ -20,6 +22,7 @@ export function HistoricalInvestigationReport({ data, onMetricReference }: { dat
     <div className="intel-summary-strip">
       <Space wrap><Status value={data.mode} /><Status value={data.status} /><span>冻结窗口 <Time value={data.from} /> — <Time value={data.to} /></span></Space>
     </div>
+    <FrozenRuleFacts facts={data.frozen_facts as FrozenRuleFact[] | undefined} window={typeof data.from === 'string' && typeof data.to === 'string' ? { from: data.from, to: data.to } : null} onMetricReference={onMetricReference} />
     {!['completed', 'succeeded'].includes(String(data.status)) && <Alert type="warning" showIcon title="分析尚未成功完成" description="保留输出不能代表当前诊断已完成。" />}
     {!['completed', 'succeeded'].includes(String(data.status)) && !report?.executive_summary
       ? <Alert type="info" showIcon title="本轮未生成结论摘要" description="原始内容按原样保留；不根据事实列表补写模型结论。" />

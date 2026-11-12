@@ -1366,7 +1366,7 @@ def get_frozen_metric(actor, identifier, item_id):
     return result
 
 
-def investigation_detail(actor, row, *, include_audit=True):
+def investigation_detail(actor, row, *, include_audit=True, include_facts=True):
     db = actor.db
     task = db.get(Task, row.task_id) if row.task_id else None
     result = fields(
@@ -1393,6 +1393,10 @@ def investigation_detail(actor, row, *, include_audit=True):
             "finished_at": iso(task.finished_at) if task else None,
         }
     )
+    if include_facts:
+        from .report_facts import frozen_facts
+
+        result['frozen_facts'] = frozen_facts(actor, row)
     calls = list(
         db.scalars(
             select(ModelCall)

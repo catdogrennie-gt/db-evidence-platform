@@ -929,6 +929,8 @@ def issue_detail(actor, identifier):
         t=actor.db.get(m.Task,h.task_id) if h.task_id else None
         visible_history.append({'id':h.id,'created_at':iso(h.created_at),'status':h.status,'mode':(t.payload or {}).get('mode','rules_only') if t else 'rules_only'})
     result.update(window={'from':iso(inv.window_start),'to':iso(inv.window_end)} if inv else None,report=report,nodes=nodes,edges=edges,charts=charts,checks=checks.capabilities if checks else [],next_checks=(report or {}).get('next_readonly_checks',[]),unknowns=(report or {}).get('unknowns',['尚无已完成的证据分析']),refutations=(report or {}).get('refutations',[]),history=visible_history)
+    from .report_facts import frozen_facts
+    result['frozen_facts'] = frozen_facts(actor, inv) if inv else []
     return result
 
 

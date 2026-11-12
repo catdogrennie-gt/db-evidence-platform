@@ -44,9 +44,10 @@ function Claim({ title, claim, onMetricReference }: { title: string; claim: Summ
 export function ExecutiveSummary({ report, onMetricReference, mode }: { report: Row | null; onMetricReference?: (ref: string) => void; mode?: string }) {
   const summary = report?.executive_summary as ExecutiveSummaryData | undefined;
   if (!summary || mode === 'rules_only') return <Alert showIcon type="info" title={mode === 'rules_only' ? '规则报告未生成模型执行摘要' : report ? '旧版未生成完整结论摘要' : '报告尚未生成执行摘要'} description="原始内容按原样保留；不根据事实列表补写模型结论。" />;
-  return <Card className="executive-summary" title="结论摘要">
+  return <Card className="executive-summary" title="AI分析">
+    <p className="intel-muted">以下为 AI 对原因的解释与建议，不替代已确认事实；原始判断按原文保留。</p>
     <h2>{summary.headline}</h2>
-    <div className="executive-verdict"><strong>问题结论</strong><ClaimStatus claim={summary.conclusion} /><p>{summary.conclusion.statement}</p></div>
+    <div className="executive-verdict"><strong>AI判断</strong><ClaimStatus claim={summary.conclusion} /><p>{summary.conclusion.statement}</p></div>
     <div className="executive-questions">
       <section className="executive-column"><h3>发生了什么</h3><ClaimStatus claim={summary.phenomenon} /><p>{summary.phenomenon.statement}</p></section>
       <section className="executive-column"><h3>为什么</h3><h4>各层原因</h4>
@@ -62,7 +63,7 @@ export function ExecutiveSummary({ report, onMetricReference, mode }: { report: 
       <Claim title="发生了什么" claim={summary.phenomenon} onMetricReference={onMetricReference} />
       {summary.surface_causes.map((claim, i) => <Claim key={i} title={`第 ${i + 1} 层原因`} claim={claim} onMetricReference={onMetricReference} />)}
       <Claim title="联合根因候选" claim={summary.joint_root_cause} onMetricReference={onMetricReference} />
-      <Claim title="问题结论" claim={summary.conclusion} onMetricReference={onMetricReference} />
+      <Claim title="AI判断" claim={summary.conclusion} onMetricReference={onMetricReference} />
       <section className="executive-actions"><h3>建议操作与完整前提</h3><ol>{summary.recommended_actions.map((action, i) => <li key={i}><p>{action.description}</p><ActionBadges action={action} /><StatementRefs data={action.evidence_ids} onMetricReference={onMetricReference} />{!!action.prerequisites?.length && <p>前提条件：{action.prerequisites.join('；')}</p>}{!!action.verification?.length && <p>复验方法：{action.verification.join('；')}</p>}</li>)}</ol></section>
     </details>
   </Card>;

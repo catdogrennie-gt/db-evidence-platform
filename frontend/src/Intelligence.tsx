@@ -1,4 +1,5 @@
 import { ExecutiveSummary } from './ExecutiveSummary';
+import { FrozenRuleFacts } from './FrozenRuleFacts';
 export { ExecutiveSummary } from './ExecutiveSummary';
 import { useEffect, useId, useMemo, useState } from 'react';
 import {
@@ -1013,6 +1014,7 @@ export function ReportEvidence({ data, onMetricReference }: { data: IssueDetail;
   const state = reportState({ ...data, status: String(data.report_status ?? data.status) });
   const charts = prioritizeIssueCharts((data.charts ?? []).filter(chart => chartData(chart.points ?? []).some(([, value]) => value !== null)), data.issue_category, data.event_subject?.id ?? data.instance_ids?.[0]);
   return <>
+    <FrozenRuleFacts facts={data.frozen_facts} window={data.window} onMetricReference={onMetricReference} />
     {data.finding_status === 'observed' && data.summary && data.presentation_kind !== 'signal' && <Alert
       className="intel-gap-banner" showIcon
       type={isHistoricalObservation(data) ? 'info' : 'warning'}
