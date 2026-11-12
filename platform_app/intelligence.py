@@ -16,6 +16,7 @@ from .investigations import create_investigation, require_investigation_access, 
 from .config import group_collection_allowed, require_legacy
 from .monitoring import mapping_for
 from .scheduling import db_now, task_ref
+from .selection_scope import capture_selection_scope, validate_selection_scope
 
 POLICY_FIELDS = ['id','version','enabled','instance_ids','signal_interval_seconds','ai_interval_seconds','urgent_enabled','cooldown_seconds','max_daily_runs','mode','external_confirmed','next_signal_at','next_ai_at','last_dispatched_at','last_completed_at','status','reason']
 LABELS = {'lock_wait': '存在数据库锁等待', 'sql_latency': 'SQL 窗口平均耗时偏高', 'cpu_pressure': '主机 CPU 持续压力', 'probe_unavailable': '数据库探测不可用', 'cpu_trend': 'CPU 增长趋势的条件性容量风险', 'baseline_change': '监控项出现持续基线变化，待关联分析', 'evidence_correlation': '待核验：AI 证据关联假设'}
@@ -89,6 +90,7 @@ def check_inspection_task(db, task):
         mapping = mapping_for(db, identifier)
         if not group_collection_allowed(db, instance): require_legacy(db=db)
         if not instance or not instance.enabled or (mapping and not mapping.selected): raise PlatformError(409, 'inspection_object_paused', '巡检对象已停用。')
+    validate_selection_scope(db, marker.get('evidence_scope'), task.payload.get('instance_ids', []))
 
 
 def conditional_risk(points, *, threshold):
@@ -496,7 +498,8 @@ def dispatch_due(factory, *, policy_id=None, force=False):
                 # Nested transaction preserves a visible blocked state on queue limits.
                 try:
                     with db.begin_nested():
-                        inv, task = create_investigation(actor,identifiers,now-timedelta(hours=1),now,'自动综合巡检：关联应用、数据库、主机和网络的实际证据；先说明发生什么、影响和建议操作，再比较异常与基线，列出反证和未知。区分应用侧与数据库侧原因，不能把相关性当成已证实根因。',mode=policy.mode,event_id=event_id,idempotency_key=key,options={'external_confirmed':policy.external_confirmed,'max_tool_calls':6,'inspection':{'policy_id':policy.id,'version':policy.version,'signals':[{'category':f.category,'kind':f.kind,'instance_id':f.instance_id,'signal_hash':f.signal_hash,'evidence_ids':f.evidence_ids,'calculation':f.calculation} for f in findings if f.instance_id in identifiers]}})
+                        evidence_scope = capture_selection_scope(db, identifiers)
+                        inv, task = create_investigation(actor,identifiers,now-timedelta(hours=1),now,'自动综合巡检：关联应用、数据库、主机和网络的实际证据；先说明发生什么、影响和建议操作，再比较异常与基线，列出反证和未知。区分应用侧与数据库侧原因，不能把相关性当成已证实根因。',mode=policy.mode,event_id=event_id,idempotency_key=key,options={'external_confirmed':policy.external_confirmed,'max_tool_calls':6,'inspection':{'policy_id':policy.id,'version':policy.version,'evidence_scope':evidence_scope,'signals':[{'category':f.category,'kind':f.kind,'instance_id':f.instance_id,'signal_hash':f.signal_hash,'evidence_ids':f.evidence_ids,'calculation':f.calculation} for f in findings if f.instance_id in identifiers]}})
                         db.add(m.InspectionDispatch(policy_id=policy.id,policy_version=policy.version,dispatch_key=key,trigger=trigger,event_id=event_id,instance_ids=identifiers,investigation_id=inv.id,task_id=task.id))
                         for f in findings:
                             if f.instance_id in identifiers:

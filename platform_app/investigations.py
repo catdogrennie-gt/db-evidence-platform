@@ -825,6 +825,7 @@ def run_investigation(session_factory, lease, config, model_client=None):
                 investigation.window_end,
                 retain_days=90,
                 required_evidence_ids=required_ids,
+                selection_scope=(options.get('inspection') or {}).get('evidence_scope'),
             )
             investigation.manifest_id = manifest.id
             bundle, evidence_ids, metric_ids, cited_ids = _bundle(

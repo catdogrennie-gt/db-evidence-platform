@@ -261,7 +261,7 @@ def append_batch(
     return evidence_ids
 
 
-def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, retain_days=90, *, required_evidence_ids=()):
+def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, retain_days=90, *, required_evidence_ids=(), selection_scope=None):
     """Freeze a bounded historical window, including owners that never call AI.
 
     The caller authorizes the owner and all instance IDs before entering here.
@@ -275,6 +275,9 @@ def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, 
     ids = sorted(set(instance_ids))
     if not ids or len(ids) > 5:
         raise PlatformError(422, "invalid_manifest_scope", "证据清单需要 1–5 个实例。")
+    from .selection_scope import evidence_selection_predicate, filter_metric_windows, validate_selection_scope
+    if selection_scope is not None:
+        validate_selection_scope(db, selection_scope, ids)
     config = db.info.get("platform_config")
     frozen_metrics = {
         "items": [],
@@ -291,6 +294,21 @@ def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, 
             frozen_metrics = materialize_source_windows(db, config, ids, start, end)
         except PlatformError as exc:
             frozen_metrics["coverage"]["reason_codes"] = [exc.detail["code"]]
+    if selection_scope is not None:
+        # Network materialization happens before the short, fresh selection
+        # lock. Never freeze a mixture of a queued scope and a newer mapping.
+        validate_selection_scope(db, selection_scope, ids, lock=True)
+        windows = filter_metric_windows(frozen_metrics["items"], selection_scope)
+        metric_coverage = dict(frozen_metrics["coverage"])
+        expected = {(identifier, item['hostid'], item['itemid'])
+                    for identifier, selected in selection_scope['instances'].items()
+                    for item in selected['items'] if item['value_kind'] == 'numeric'}
+        actual = {(window['instance_id'], window['provenance']['hostid'], window['provenance']['itemid'])
+                  for window in windows if window.get('instance_id') in selection_scope['instances']}
+        if expected - actual:
+            metric_coverage['complete'] = False
+            metric_coverage['reason_codes'] = sorted(set(metric_coverage.get('reason_codes', []) + ['selected_metric_window_missing']))
+        frozen_metrics = {'items': windows, 'coverage': metric_coverage}
     versions = list(
         db.scalars(
             select(EvidenceManifest)
@@ -301,6 +319,8 @@ def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, 
     # Select by diagnostic layer before the global bound: a chatty metric source
     # must not evict all older SQL/log snapshots or the baseline from a report.
     predicates = [Evidence.instance_id.in_(ids), Evidence.source_mode == "live", Evidence.observed_at >= start, Evidence.observed_at < end]
+    if selection_scope is not None:
+        predicates.append(evidence_selection_predicate(selection_scope))
     groups = list(db.execute(select(Evidence.instance_id, Evidence.source, func.count()).where(*predicates).group_by(Evidence.instance_id, Evidence.source).order_by(Evidence.instance_id, Evidence.source).limit(101)))
     source_group_truncated = len(groups) > 100
     groups = groups[:100]
@@ -336,6 +356,9 @@ def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, 
                 MetricFrame.instance_id.in_(ids),
                 MetricFrame.observed_at >= start,
                 MetricFrame.observed_at < end,
+                # Group frames have no source/item provenance. Scoped groups
+                # use selected Zabbix windows instead of legacy aggregates.
+                ~MetricFrame.instance_id.in_(list(selection_scope['instances'])) if selection_scope is not None else True,
             )
             .order_by(MetricFrame.observed_at.desc())
             .limit(1001)
@@ -394,6 +417,8 @@ def create_manifest(db, owner_type, owner_id, instance_ids, from_time, to_time, 
         "truncated": truncated,
         "gaps": gaps,
     }
+    if selection_scope is not None:
+        payload['selection_scope'] = selection_scope
     manifest = EvidenceManifest(
         id=str(uuid4()),
         owner_type=owner_type,
