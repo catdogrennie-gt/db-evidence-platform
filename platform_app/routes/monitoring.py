@@ -57,7 +57,7 @@ class GroupInput(BaseModel):
     name: str = Field(min_length=1,max_length=120)
     source_id: str
     description: str = Field(default='',max_length=2000)
-    items: list[ItemRef] = Field(min_length=1,max_length=32)
+    items: list[ItemRef] = Field(min_length=1,max_length=groups.MAX_GROUP_ITEMS)
     relations: list[RelationInput] = Field(default_factory=list,max_length=32)
     enabled: bool = True
     interval_seconds: int = Field(default=60,ge=10,le=3600)

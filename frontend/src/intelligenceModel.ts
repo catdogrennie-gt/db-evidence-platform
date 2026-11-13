@@ -211,15 +211,16 @@ export interface AnalysisGroupInput {
 export function analysisSelectionKey(item: Pick<ZabbixItem, 'hostid' | 'itemid'>): string {
   return `${item.hostid}:${item.itemid}`;
 }
+export const MAX_ANALYSIS_GROUP_ITEMS = 40;
 export function updateAnalysisSelection(previous: ZabbixItem[], page: ZabbixItem[], keys: string[]): ZabbixItem[] {
   const unique = [...new Set(keys)];
-  if (unique.length > 32) throw new Error('每个联合分析对象最多选择 32 个监控项');
+  if (unique.length > MAX_ANALYSIS_GROUP_ITEMS) throw new Error(`每个联合分析对象最多选择 ${MAX_ANALYSIS_GROUP_ITEMS} 个监控项`);
   const known = new Map([...previous, ...page].map(item => [analysisSelectionKey(item), item]));
   if (unique.some(key => !known.has(key))) throw new Error('监控项已变化，请重新加载后选择');
   return unique.map(key => known.get(key)!);
 }
 export function analysisGroupPayload(values: Row, selected: ZabbixItem[], relations: AnalysisRelation[]): AnalysisGroupInput {
-  if (!selected.length || selected.length > 32) throw new Error('请选择 1 到 32 个监控项');
+  if (!selected.length || selected.length > MAX_ANALYSIS_GROUP_ITEMS) throw new Error(`请选择 1 到 ${MAX_ANALYSIS_GROUP_ITEMS} 个监控项`);
   if (new Set(selected.map(analysisSelectionKey)).size !== selected.length) throw new Error('请移除重复监控项');
   const hosts = new Set(selected.map(item => item.hostid));
   if (relations.some(relation => !hosts.has(relation.from_hostid) || !hosts.has(relation.to_hostid)))

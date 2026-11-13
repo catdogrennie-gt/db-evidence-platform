@@ -8,7 +8,7 @@ const item = (hostid, itemid, extra = {}) => ({
   lastclock: '1000', selectable: true, ...extra,
 });
 
-test('item selections preserve host identity across pages and enforce the 32-item boundary', () => {
+test('item selections preserve host identity across pages and enforce the 40-item boundary', () => {
   assert.equal(typeof model.analysisSelectionKey, 'function');
   assert.equal(typeof model.updateAnalysisSelection, 'function');
   const first = item('1', '11');
@@ -17,9 +17,11 @@ test('item selections preserve host identity across pages and enforce the 32-ite
   assert.deepEqual(model.updateAnalysisSelection([first], [second], ['1:11', '2:22']), [first, second]);
   assert.deepEqual(model.updateAnalysisSelection([first], [second], ['2:22']), [second]);
   assert.throws(() => model.updateAnalysisSelection([], [first], ['not-a-returned-item']), /重新/);
-  const many = Array.from({ length: 33 }, (_, index) => item('1', String(index)));
-  assert.equal(model.updateAnalysisSelection([], many, many.slice(0, 32).map(model.analysisSelectionKey)).length, 32);
-  assert.throws(() => model.updateAnalysisSelection([], many, many.map(model.analysisSelectionKey)), /32/);
+  const many = Array.from({ length: 41 }, (_, index) => item('1', String(index)));
+  assert.equal(model.updateAnalysisSelection([], many, many.slice(0, 40).map(model.analysisSelectionKey)).length, 40);
+  assert.throws(() => model.updateAnalysisSelection([], many, many.map(model.analysisSelectionKey)), /40/);
+  assert.equal(model.analysisGroupPayload({ name:'Full context', source_id:'s' }, many.slice(0, 40), []).items.length, 40);
+  assert.throws(() => model.analysisGroupPayload({ name:'Full context', source_id:'s' }, many, []), /40/);
 });
 
 test('group payload contains exact item references and revision, never discovery metadata or credentials', () => {

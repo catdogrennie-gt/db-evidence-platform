@@ -46,6 +46,79 @@ def test_catalog_preserves_duplicate_tags_and_unknown_types(group_env):
     assert 'lastvalue' not in str(result)
 
 
+@pytest.mark.parametrize('count', [34, 40])
+def test_group_can_add_context_without_dropping_existing_items(group_env, count):
+    from platform_app.analysis_groups import save_group
+    e = group_env
+    prototype = e['fake'].items[0]
+    e['fake'].items = [dict(prototype, itemid=str(1000+i), key_='custom.'+str(i)) for i in range(count)]
+    refs = [{'hostid':'101','itemid':i['itemid']} for i in e['fake'].items]
+    first = save_group(e['actor'], e['config'], dict(e['body'], items=refs[:32], relations=[]))
+    expanded = save_group(e['actor'], e['config'], dict(e['body'], items=refs, relations=[], config_revision=first['config_revision']), first['id'])
+    assert expanded['id'] == first['id'] and expanded['instance_id'] == first['instance_id']
+    assert expanded['config_revision'] == first['config_revision']+1
+    assert {i['itemid'] for i in expanded['items']} == {i['itemid'] for i in refs}
+
+
+def test_group_rejects_41_items_before_upstream_reads(group_env):
+    from platform_app.analysis_groups import save_group
+    e = group_env
+    e['fake'].calls.clear()
+    with pytest.raises(HTTPException) as error:
+        save_group(e['actor'], e['config'], dict(e['body'], items=[{'hostid':'101','itemid':str(i)} for i in range(41)], relations=[]))
+    assert error.value.detail['code'] == 'invalid_item_selection'
+    assert not e['fake'].calls
+
+
+@pytest.mark.parametrize('count', [34, 40, 41])
+def test_group_http_create_and_update_share_the_item_boundary(group_env, count):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from platform_app.identity import current_actor
+    from platform_app.routes.monitoring import router
+    e = group_env
+    prototype = e['fake'].items[0]
+    e['fake'].items = [dict(prototype, itemid=str(1000+i), key_='custom.'+str(i)) for i in range(count)]
+    body = dict(e['body'], items=[{'hostid':'101','itemid':i['itemid']} for i in e['fake'].items], relations=[])
+    app = FastAPI(); app.state.config=e['config']; app.include_router(router, prefix='/api/v1')
+    app.dependency_overrides[current_actor] = lambda:e['actor']
+    e['fake'].calls.clear()
+    with TestClient(app) as client:
+        created = client.post('/api/v1/monitoring/groups', json=body)
+        if count==41:
+            assert created.status_code==422 and not e['fake'].calls
+            return
+        assert created.status_code==201, created.json()
+        group = created.json()
+        assert group['item_count']==count
+        updated = client.put('/api/v1/monitoring/groups/'+group['id'], json=dict(body, config_revision=group['config_revision'], description='Retained context'))
+        assert updated.status_code==200, updated.json()
+        assert updated.json()['instance_id']==group['instance_id'] and updated.json()['item_count']==count
+
+
+def test_forty_dependent_items_collect_within_existing_source_call_budget(group_env):
+    from platform_app.analysis_groups import save_group
+    from platform_app.monitoring import handle_collection
+    from platform_app.scheduling import enqueue, claim
+    e = group_env
+    prototype = e['fake'].items[0]
+    e['fake'].items = [dict(prototype, itemid=str(1000+i), key_='custom.'+str(i), type='18', delay='0', master_itemid='9000') for i in range(40)]
+    e['fake'].items.append(dict(prototype, itemid='9000', key_='custom.master', type='0', delay='60s', master_itemid='0'))
+    refs = [{'hostid':'101','itemid':str(1000+i)} for i in range(40)]
+    group = save_group(e['actor'], e['config'], dict(e['body'], items=refs, relations=[]))
+    task = enqueue(e['db'], 'collect_instance', instance_id=group['instance_id'], payload={'config_revision':group['config_revision'],'collectors':['monitoring']})
+    e['db'].commit(); e['fake'].calls.clear()
+    lease = claim(e['factory'], 'forty-context-items', 'collection')
+    assert lease.id == task.id
+    handle_collection(e['factory'], lease, e['config']); e['db'].expire_all()
+    evidence = list(e['db'].scalars(select(m.Evidence).where(m.Evidence.instance_id==group['instance_id'])))
+    assert len(evidence) == 40
+    assert {e.payload['item']['itemid'] for e in evidence} == {i['itemid'] for i in refs}
+    assert all(e.coverage['availability']=='available' for e in evidence)
+    assert len([1 for method,params in e['fake'].calls if method=='history.get']) == 40
+    assert len(e['fake'].calls) == 43 and len(e['fake'].calls) <= 48
+
+
 def test_group_exact_membership_noop_and_config_fence(group_env):
     from platform_app.analysis_groups import save_group
     from platform_app.monitoring import select_hosts
@@ -405,16 +478,16 @@ def test_real_model_payload_keeps_large_group_numeric_context_and_frozen_tool(gr
     assert result.status=='completed' and len(captured)==2, (result.report,len(captured),[(len(json.dumps(p,ensure_ascii=False,separators=(',',':')).encode())+512,len(json.loads(p['messages'][1]['content']).get('numeric_series',{}).get('rows',[])),len(p.get('tools',[]))) for p in captured])
 
 
-@pytest.mark.parametrize('count',[32,33])
+@pytest.mark.parametrize('count',[40,41])
 def test_group_item_budget_includes_unknown_keys(group_env,count):
     from platform_app.analysis_groups import save_group
     e=group_env; base=e['fake'].items[0]
     e['fake'].items=[dict(base,itemid=str(100+i),key_='unknown.'+str(i)) for i in range(count)]
     body=dict(e['body'],items=[{'hostid':'101','itemid':str(100+i)} for i in range(count)],relations=[])
-    if count==33:
+    if count==41:
         with pytest.raises(HTTPException): save_group(e['actor'],e['config'],body)
     else:
-        assert save_group(e['actor'],e['config'],body)['item_count']==32
+        assert save_group(e['actor'],e['config'],body)['item_count']==40
 
 
 def test_model_compaction_does_not_merge_source_local_item_ids():

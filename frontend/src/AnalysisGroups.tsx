@@ -9,7 +9,7 @@ import { useCan, useResource, useScope, useScopedPath } from './hooks';
 import { ContextLink, ErrorNotice, LoadState, Status, Time } from './ui';
 import { MetricPanel } from './Intelligence';
 import {
-  analysisGroupPayload, analysisGroupReadyLabel, analysisHistoryCoverage, analysisItemStatus, analysisSelectionKey, scopeKey, updateAnalysisSelection,
+  analysisGroupPayload, analysisGroupReadyLabel, analysisHistoryCoverage, analysisItemStatus, analysisSelectionKey, MAX_ANALYSIS_GROUP_ITEMS, scopeKey, updateAnalysisSelection,
 } from './intelligenceModel';
 import type {
   AnalysisGroup, AnalysisRelation, DiscoveredHost, MonitoringSource, ObjectMetrics,
@@ -218,7 +218,7 @@ function GroupEditor({ group, sources, sourcesLoading, close, saved }: {
   const chosenSource = sources.find(source => source.id === sourceId);
   return <Modal open width={1120} className="analysis-group-editor" title={group ? `编辑联合分析对象 · ${group.name}` : '新建联合分析对象'}
     onCancel={close} destroyOnHidden footer={<div className="analysis-wizard-footer">
-      <span>{selectedHosts.length} 个主机 · {selected.length} / 32 个监控项</span>
+      <span>{selectedHosts.length} 个主机 · {selected.length} / {MAX_ANALYSIS_GROUP_ITEMS} 个监控项</span>
       <Space><Button onClick={close}>取消</Button>{step > 0 && <Button onClick={() => setStep(value => value - 1)}>上一步</Button>}
         {step < 3 ? <Button type="primary" onClick={next}>下一步</Button> : <Button type="primary" loading={busy} onClick={save}>保存联合对象</Button>}</Space>
     </div>}>
@@ -241,7 +241,7 @@ function GroupEditor({ group, sources, sourcesLoading, close, saved }: {
         </div>
       </div>
       {step === 1 && <div className="analysis-wizard-step">
-        <Alert type="info" showIcon title="按实际监控项选择，过滤不会清空已选数据" description="未知 key 也可接入。数值可绘图，文本和日志保留各自含义；尚无采样或不支持的项目会明确显示。最多 32 项，建议选择与分析目标相关的数据。" />
+        <Alert type="info" showIcon title="按实际监控项选择，过滤不会清空已选数据" description={`未知 key 也可接入。数值可绘图，文本和日志保留各自含义；尚无采样或不支持的项目会明确显示。最多 ${MAX_ANALYSIS_GROUP_ITEMS} 项，建议选择与分析目标相关的数据。`} />
         <div className="analysis-item-filters">
           <label htmlFor="analysis-hosts">主机范围</label>
           <Select id="analysis-hosts" mode="multiple" allowClear showSearch optionFilterProp="label" value={hostids} onChange={setHostids} loading={hosts.loading}
@@ -255,7 +255,7 @@ function GroupEditor({ group, sources, sourcesLoading, close, saved }: {
         <div className="analysis-selected-summary"><strong>已选 {selected.length} 项</strong><span>{selectedHosts.map(host => host.name).join(' · ') || '从下表勾选需要关联的数据'}</span></div>
         <Table<ZabbixItem> rowKey={analysisSelectionKey} size="small" loading={loading} pagination={false} dataSource={itemPage?.items ?? []} scroll={{ x: 870, y: 360 }}
           rowSelection={{ selectedRowKeys: selectedKeys, preserveSelectedRowKeys: true, onChange: select,
-            getCheckboxProps: item => ({ disabled: item.selectable === false || (selected.length >= 32 && !selectedKeys.includes(analysisSelectionKey(item))) }),
+            getCheckboxProps: item => ({ disabled: item.selectable === false || (selected.length >= MAX_ANALYSIS_GROUP_ITEMS && !selectedKeys.includes(analysisSelectionKey(item))) }),
           }} columns={[
             { title: '监控项 / 来源主机', width: 310, render: (_, item) => <div><strong>{item.name}</strong><div className="intel-muted">{item.host_name} · <code>{item.key}</code></div><ItemTags item={item} /></div> },
             { title: '含义', width: 125, render: (_, item) => <><Tag>{kindLabels[item.value_kind] ?? '未知值类型'}</Tag><div className="intel-muted">{item.units || '未设置单位'} · 类型 {item.value_type}</div></> },

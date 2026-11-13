@@ -13,6 +13,8 @@ from .common import PlatformError,iso,parse_time
 from .db import utcnow
 from .zabbix_items import catalog,matches_tags,typed_history
 
+MAX_GROUP_ITEMS = 40  # 40 histories + at most 3 catalog calls < 48 source calls.
+
 
 def is_group(mapping): return mapping is not None and mapping.layer=='group' and mapping.hostid.startswith('group:')
 
@@ -90,7 +92,7 @@ def list_groups(actor,config,**scope):
 def save_group(actor,config,body,identifier=None):
     from .monitoring import get_source,client_for
     refs=body.get('items',[])
-    if not 1<=len(refs)<=32 or len({(r['hostid'],r['itemid']) for r in refs})!=len(refs) or len({r['itemid'] for r in refs})!=len(refs): raise PlatformError(422,'invalid_item_selection','必须选择1至32个不重复监控项。')
+    if not 1<=len(refs)<=MAX_GROUP_ITEMS or len({(r['hostid'],r['itemid']) for r in refs})!=len(refs) or len({r['itemid'] for r in refs})!=len(refs): raise PlatformError(422,'invalid_item_selection',f'必须选择1至{MAX_GROUP_ITEMS}个不重复监控项。')
     source=get_source(actor,body['source_id']); mapping=None; instance=None
     if identifier:
         mapping,instance,old_source=get_group(actor,identifier,'asset.manage')
