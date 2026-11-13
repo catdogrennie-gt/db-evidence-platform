@@ -12,6 +12,8 @@
 
 当前联合对象的历史数据来自Zabbix，不能把历史Prometheus地址偏差直接解释为Zabbix图表或AI取证失败。详细核对范围、失败记录及下一步见[恢复检查记录](validation/startup-01.md)。
 
+新增的`scripts/platform/mysql_recovery.py`只是控制库恢复**判定工具**，读取私密契约与观测JSON，返回`present_ready`（无需动作）、`present_not_ready`（等待）、`refused`（停止并核查）或`start_required`（需要后续受控执行器）。它没有执行器，不能启动、停止或初始化数据库。现有Windows控制库父子进程尚未通过这一新适配的集成验收，恢复契约未登记；不要把`start_required`当恢复成功，也不要为得到通过结果而删除进程、变更UUID或初始化目录。
+
 ## 1. 先选入口和身份
 
 | 入口或身份 | 可以做什么 |
