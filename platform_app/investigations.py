@@ -42,7 +42,7 @@ from .report_summary import ExecutiveSummary
 from .scheduling import check_fence, complete, enqueue, fail
 from .tools import ToolBroker, project_evidence, tool_definitions, TOOL_SOURCES
 
-PROMPT_VERSION = "evidence-investigation-v4.6"
+PROMPT_VERSION = "evidence-investigation-v4.7"
 SAFE_COLLECTORS = frozenset(
     {
         "identity_status",

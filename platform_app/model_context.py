@@ -283,6 +283,11 @@ def _encode_numeric_context(initial):
     calculations=[]
     for signal in initial.get('inspection_signals',[]):
         if not isinstance(signal.get('calculation'),dict):continue
+        # Capacity is a paired, configured risk fact. Keep its operands, concern
+        # threshold, state and sample times readable together rather than mixing
+        # them into the sparse positional table of unrelated baseline changes.
+        # This changes representation only; normal/recovered facts stay normal.
+        if signal.get('category')=='capacity_pressure':continue
         values=flatten(signal['calculation'])
         for key in list(values):
             if (key in ('observed_at','episode_started_at','returned_at') or key.endswith(('.from','.to'))) and isinstance(values[key],str):
