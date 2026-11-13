@@ -5,7 +5,7 @@ import json
 import math
 from fastapi import HTTPException
 from pydantic import ValidationError
-from sqlalchemy import select, func, or_
+from sqlalchemy import select, func, or_, case
 
 from . import models as m
 from .access import actor_for_user, authorize, scoped_instance
@@ -35,19 +35,33 @@ def policy_response(policy):
     return fields(policy, POLICY_FIELDS) if policy else None
 
 
-def effective_policy_state(db,policy,*,now=None,used=None):
-    """A former budget block is not a permanent policy state.
+def periodic_daily_limit(policy):
+    """Reserve 20% inside the same cap; a one-run policy stays usable."""
+    reserved=(policy.max_daily_runs+4)//5 if policy.urgent_enabled and policy.max_daily_runs>1 else 0
+    return policy.max_daily_runs-reserved
 
-    Derive availability from the existing UTC-day dispatch ledger, including
-    after midnight or an explicit administrator budget increase. No history or
-    limits are changed, and unrelated failure/permission states are preserved.
-    """
-    if policy.enabled and policy.status=='budget_exhausted':
-        if used is None:
-            now=now or db_now(db)
-            day=now.replace(hour=0,minute=0,second=0,microsecond=0)
-            used=db.scalar(select(func.count()).select_from(m.InspectionDispatch).where(m.InspectionDispatch.policy_id==policy.id,m.InspectionDispatch.created_at>=day)) or 0
-        if used<policy.max_daily_runs:return 'scheduled',None
+
+def daily_dispatch_usage(db,policy,now):
+    """Committed reservations count across outcomes, versions and restarts."""
+    day=now.replace(hour=0,minute=0,second=0,microsecond=0)
+    used,regular=db.execute(select(func.count(),func.coalesce(func.sum(case(
+        (m.InspectionDispatch.trigger!='urgent',1),else_=0)),0))
+        .select_from(m.InspectionDispatch).where(m.InspectionDispatch.policy_id==policy.id,
+                                              m.InspectionDispatch.created_at>=day)).one()
+    return int(used),int(regular)
+
+
+def effective_policy_state(db,policy,*,now=None,used=None,regular_used=None):
+    """Project current ledger bounds, without masking unrelated failures."""
+    stable=('idle','scheduled','completed','budget_exhausted','periodic_budget_reserved')
+    if policy.enabled and policy.status in stable:
+        if used is None or regular_used is None:
+            used,regular_used=daily_dispatch_usage(db,policy,now or db_now(db))
+        if used>=policy.max_daily_runs:
+            return 'budget_exhausted','UTC 当日自动分析次数预算已用尽'
+        if regular_used>=periodic_daily_limit(policy):
+            return 'periodic_budget_reserved','当日周期与手动巡检份额已用尽，剩余次数保留给异常分析。'
+        if policy.status in ('budget_exhausted','periodic_budget_reserved'):return 'scheduled',None
     return policy.status,policy.reason
 
 
@@ -235,7 +249,7 @@ def sync_reports(db):
         policy = db.get(m.InspectionPolicy,dispatch.policy_id)
         if inv.status in ('completed','partial'):
             policy.last_completed_at = task.finished_at or db_now(db)
-            if policy.status not in ('paused','permission_denied','budget_exhausted'): policy.status = 'completed'; policy.reason = None
+            if policy.status not in ('paused','permission_denied','budget_exhausted','periodic_budget_reserved'): policy.status = 'completed'; policy.reason = None
             for finding in db.scalars(select(m.InspectionFinding).where(m.InspectionFinding.instance_id.in_(dispatch.instance_ids))):
                 if not dispatch.event_id or finding.event_id==dispatch.event_id: link_report(db,finding,inv)
             # Model findings remain reviewable hypotheses, never proven current faults.
@@ -480,9 +494,8 @@ def dispatch_due(factory, *, policy_id=None, force=False):
             work = [('periodic' if not force else 'manual',group,None) for group in groups]
             if not periodic:
                 work = [('urgent',[f.instance_id],f) for f in urgent]
-            day = now.replace(hour=0,minute=0,second=0,microsecond=0)
-            used = db.scalar(select(func.count()).select_from(m.InspectionDispatch).where(m.InspectionDispatch.policy_id==policy.id,m.InspectionDispatch.created_at>=day)) or 0
-            policy.status,policy.reason=effective_policy_state(db,policy,now=now,used=used)
+            used,regular_used=daily_dispatch_usage(db,policy,now)
+            policy.status,policy.reason=effective_policy_state(db,policy,now=now,used=used,regular_used=regular_used)
             for trigger, identifiers, finding in work:
                 # A fast sampling cadence is not a request to stack AI work.
                 # Serialize the current Zabbix group objects across policies.
@@ -492,6 +505,9 @@ def dispatch_due(factory, *, policy_id=None, force=False):
                     policy.status,policy.reason='queued','analysis_in_progress'
                     continue
                 if used >= policy.max_daily_runs: policy.status,policy.reason='budget_exhausted','UTC 当日自动分析次数预算已用尽'; break
+                if trigger!='urgent' and regular_used>=periodic_daily_limit(policy):
+                    policy.status,policy.reason='periodic_budget_reserved','当日周期与手动巡检份额已用尽，剩余次数保留给异常分析。'
+                    continue
                 event_id = finding.event_id if finding else None
                 key = digest([policy.id,policy.version,trigger,identifiers,iso(now) if trigger!='urgent' else [finding.fingerprint,finding.signal_hash]])
                 if db.scalar(select(m.InspectionDispatch.id).where(m.InspectionDispatch.dispatch_key==key)): continue
@@ -508,6 +524,7 @@ def dispatch_due(factory, *, policy_id=None, force=False):
                 except HTTPException as exc:
                     policy.status,policy.reason='queue_full',exc.detail.get('code','dispatch_failed') if isinstance(exc.detail,dict) else 'dispatch_failed'; break
                 created.append(task.id); used+=1
+                if trigger!='urgent':regular_used+=1
                 policy.last_dispatched_at,policy.status,policy.reason=now,'queued',None
     return created
 

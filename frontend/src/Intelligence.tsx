@@ -83,6 +83,7 @@ const inspectionLabels: Record<string, string> = {
   source_offline: '监控来源离线',
   offline: '监控来源离线',
   budget_exhausted: '当日预算已用尽',
+  periodic_budget_reserved: '等待异常分析',
   permission_denied: '巡检权限已失效',
   consent_required: '等待模型外发授权',
   model_failed: '模型分析失败',
