@@ -149,7 +149,12 @@ def refresh_snapshot_chronology(container, *, item_key='evidence', sort=False):
     container.pop('snapshot_chronology', None)
     container.pop('snapshot_chronology_omitted', None)
     if groups or invalid:
-        container['snapshot_chronology'] = {'scope':'supplied_retained_samples_only', 'groups':groups[:4],
+        container['snapshot_chronology'] = {'scope':'supplied_retained_samples_only',
+            'sample_kind':'point_in_time',
+            'sample_count_scope':'retained_per_source_group',
+            'not_established_by_snapshots':[
+                'release_mechanism','continuous_duration','incident_count','numeric_series_population'],
+            'groups':groups[:4],
             'groups_omitted':max(0,len(groups)-4), 'invalid_time_count':invalid}
     if sort:
         # Call only after priority selection, so sorting cannot alter retention.
