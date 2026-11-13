@@ -42,7 +42,7 @@ from .report_summary import ExecutiveSummary
 from .scheduling import check_fence, complete, enqueue, fail
 from .tools import ToolBroker, project_evidence, tool_definitions, TOOL_SOURCES
 
-PROMPT_VERSION = "evidence-investigation-v4.5"
+PROMPT_VERSION = "evidence-investigation-v4.6"
 SAFE_COLLECTORS = frozenset(
     {
         "identity_status",
@@ -345,6 +345,33 @@ def validate_report(value, allowed_evidence_ids, *, expected_version=None):
     return output
 
 
+def context_limits(model):
+    """Explicit deployment budgets; never infer a larger budget from input size."""
+    limits=[]
+    for key,default,ceiling in [('context_input_bytes',24000,64000),('total_token_budget',32000,128000)]:
+        value=model.get(key,default)
+        if type(value) is not int or not 8000<=value<=ceiling:
+            raise PlatformError(422,'invalid_model_context_budget','模型上下文预算配置无效。')
+        limits.append(value)
+    return tuple(limits)
+
+
+def _schema_retry_feedback(value):
+    # Error values/messages may contain model-controlled prose. Send paths and
+    # Pydantic error types only; no exception input, repr or invented correction.
+    try:
+        Report.model_validate(value)
+        errors=['executive_summary:required']
+    except ValidationError as exc:
+        errors=['.'.join(re.sub(r'[^a-zA-Z0-9_]','_',str(part))[:60] for part in error['loc'])+':'+error['type']
+                for error in exc.errors(include_url=False,include_input=False)[:12]]
+    return ('报告未通过结构校验：'+', '.join(errors)+
+        '。仅重新输出同一冻结证据支持的完整JSON，不调用工具，不增加事实。'
+        'metric dimension.value必须是引用监控项的真实itemid（数字字符串），不是evidence_id或UUID；'
+        '找不到对应itemid就保持findings=[]，不得虚构或改变事实来通过校验。'
+        '引用逐字复制已提供证据；所有Claim/Action及数组遵守原始契约。')
+
+
 def _safe_question(text):
     # Free-form user prose may itself contain business rows, secrets or personal
     # data. External requests receive only recognized intent categories; the
@@ -495,7 +522,27 @@ def _bundle(db, investigation, manifest, policies=None):
         if required.get('evidence_id'):trigger_ids.add(required['evidence_id'])
     # Round-robin source/asset layers, preserving both latest and baseline samples.
     buckets = {}
-    for row in db.scalars(select(Evidence).where(Evidence.id.in_(evidence_ids), Evidence.observed_at >= investigation.window_start, Evidence.observed_at < investigation.window_end).order_by(Evidence.observed_at.desc(), Evidence.id).limit(1000)):
+    frozen_rows=list(db.scalars(select(Evidence).where(Evidence.id.in_(evidence_ids), Evidence.observed_at >= investigation.window_start, Evidence.observed_at < investigation.window_end).order_by(Evidence.observed_at.desc(), Evidence.id).limit(1000)))
+    from .zabbix_diagnostics import definition,CONTRACT,APP_CONTRACT
+    def diagnostic_identity(row):
+        meta=(row.payload or {}).get('item') or {};coverage=row.coverage or {}
+        parts=(row.instance_id,coverage.get('source_id'),meta.get('hostid'),meta.get('itemid'),row.observed_at)
+        return parts if all(isinstance(v,str) and v for v in parts[:-1]) else None
+    typed=set()
+    for row in frozen_rows:
+        spec=definition((row.payload or {}).get('item')or{})
+        if (spec and spec['source']==row.source
+                and (row.coverage or{}).get('snapshot_contract')==(APP_CONTRACT if spec['query']=='application_logs' else CONTRACT)
+                and (row.coverage or{}).get('availability')=='available'):
+            identity=diagnostic_identity(row)
+            if identity:typed.add((identity,spec['query']))
+    duplicate_raw_count=0
+    for row in frozen_rows:
+        raw_spec=definition((row.payload or{}).get('item')or{}) if row.source.startswith('zabbix.item.text:') else None
+        if (row.id not in trigger_ids and raw_spec
+                and (diagnostic_identity(row),raw_spec['query']) in typed):
+            duplicate_raw_count+=1
+            continue
         metadata=(row.payload or {}).get('item')
         metadata=metadata if isinstance(metadata,dict) else {}
         source_id=(row.coverage or {}).get('source_id')
@@ -521,7 +568,7 @@ def _bundle(db, investigation, manifest, policies=None):
     # all available SQL/log/host context needed to distinguish mechanisms.
     candidates.sort(key=lambda row:(row.id not in trigger_ids,
                                     row.source.startswith('zabbix.item.numeric:')))
-    selected=set()
+    selected=set();snapshot_bytes=0;numeric_bytes=0;context_omitted=0
     for row in candidates[:100]:
         if row.id in selected: continue
         selected.add(row.id)
@@ -533,12 +580,28 @@ def _bundle(db, investigation, manifest, policies=None):
         elif isinstance(projected.get("data", {}).get("rows"), list):
             rows=projected['data']['rows']
             projected['data']['rows']=rows[:4]
+            if len(rows)>4:projected['data']['rows_omitted']=len(rows)-4
+        data=projected.get('data')or{}
+        if not row.source.startswith('zabbix.item.numeric:'):
+            if isinstance(data.get('item'),dict):
+                data['item']={k:v for k,v in data['item'].items() if k in (
+                    'source_id','hostid','itemid','name','key','units','value_semantics','semantics_source')}
+            events=data.get('events')
+            if isinstance(events,list) and len(events)>6:
+                data['events']=events[:1]+events[-5:]
+                data['events_omitted']=len(events)-6
         # A compact numeric trigger must not consume the independent allowance
         # for SQL/log/lock context. The complete model request remains subject
         # to the unchanged 24k/32k limits below.
-        allowance=6500 if row.source.startswith('zabbix.item.numeric:') else 9000
-        if (len(json.dumps(items + [projected], ensure_ascii=False).encode()) > allowance
-                and row.id not in representatives and row.id not in trigger_ids): continue
+        numeric=row.source.startswith('zabbix.item.numeric:')
+        size=len(json.dumps(projected,ensure_ascii=False,separators=(',',':')).encode())
+        allowance=6500 if numeric else 40000
+        used=numeric_bytes if numeric else snapshot_bytes
+        if (used+size > allowance and row.id not in representatives and row.id not in trigger_ids):
+            context_omitted+=1
+            continue
+        if numeric:numeric_bytes+=size
+        else:snapshot_bytes+=size
         items.append(projected)
         used_ids.add(row.id)
     if not (representatives | (trigger_ids & evidence_ids)).issubset(used_ids):
@@ -558,9 +621,12 @@ def _bundle(db, investigation, manifest, policies=None):
             item['data']['registered_relationships']=safe_relations(payload)
             item['data']['unit']=safe_text(payload.get('unit'))
             item['data']['summary_scope']='retained_samples_only' if payload.get('coverage',{}).get('sampling') else 'returned_history_samples'
-        if len(json.dumps(items + [item], ensure_ascii=False).encode()) <= 6500:
+        size=len(json.dumps(item,ensure_ascii=False,separators=(',',':')).encode())
+        if numeric_bytes+size <= 6500:
             items.append(item)
             used_ids.add(item['evidence_id'])
+            numeric_bytes+=size
+        else:context_omitted+=1
     coverage_item = db.scalar(
         select(ManifestItem)
         .where(ManifestItem.manifest_id == manifest.id, ManifestItem.item_type == "coverage")
@@ -593,6 +659,8 @@ def _bundle(db, investigation, manifest, policies=None):
             "projection": {
                 "omitted_fields": ["names_sql_and_log_text_omitted"],
                 "initial_evidence_bounded": True,
+                "duplicate_raw_diagnostics_omitted": duplicate_raw_count,
+                "context_omitted_evidence_count": context_omitted,
             },
             "prompt_version": PROMPT_VERSION,
         },
@@ -847,13 +915,15 @@ def run_investigation(session_factory, lease, config, model_client=None):
                 json.dumps(bundle, sort_keys=True, ensure_ascii=False).encode()
             ).hexdigest()
             investigation.status = "analyzing"
-            for identifier in evidence_ids:
-                if db.get(InvestigationEvidence, (investigation.id, identifier)) is None:
-                    db.add(
-                        InvestigationEvidence(
-                            investigation_id=investigation.id, evidence_id=identifier
-                        )
-                    )
+            # A frozen manifest can contain 1000 references. Per-ID get() both
+            # queries and autoflushes on every iteration over a networked DB.
+            # Scope remains this exact investigation and its authorized frozen
+            # IDs; preserve existing associations without N+1 round trips.
+            existing=set(db.scalars(select(InvestigationEvidence.evidence_id).where(
+                InvestigationEvidence.investigation_id==investigation.id,
+                InvestigationEvidence.evidence_id.in_(evidence_ids)))) if evidence_ids else set()
+            db.add_all([InvestigationEvidence(investigation_id=investigation.id,evidence_id=identifier)
+                        for identifier in evidence_ids if identifier not in existing])
             db.commit()
             if mode == "rules_only":
                 report = _rules_report(bundle)
@@ -968,6 +1038,7 @@ def _run_live(
     # A configured 4000-token report must not be silently clipped to 3000.
     # This ceiling still reserves output within the unchanged 24k/32k checks.
     max_output = max(1, min(4096, int(model.get("max_tokens", 3000))))
+    input_limit,total_limit=context_limits(model)
     max_tool_calls = max(0, min(6, int(options.get("max_tool_calls", 6))))
     max_cost = options.get("max_cost_usd")
     if max_cost is not None and not all(
@@ -1078,7 +1149,7 @@ def _run_live(
         }
         # Reserve 100 bytes for retained_evidence_count added below. The final
         # serialized request (including 512 overhead) must still fit 24k.
-        initial_limit=23900
+        initial_limit=input_limit-100
         if len(json.dumps(probe, ensure_ascii=False, separators=(",", ":")).encode()) + 512 <= initial_limit:
             break
         removable=next((index for index in range(len(initial['evidence'])-1,-1,-1) if initial['evidence'][index]['evidence_id'] not in protected_ids),None)
@@ -1097,13 +1168,15 @@ def _run_live(
     reserved_cost = 0.0
     token_used = 0
     compacted = False
+    schema_retry=False
+    retry_feedback=None
     for sequence in range(1, max_rounds + 1):
         safety()
         check_fence(db, lease, allow_inactive=True)
         remaining = (lease.deadline_at - utcnow()).total_seconds()
         if remaining <= 1:
             raise PlatformError(409, "investigation_deadline_exceeded", "调查运行期限已到。")
-        force_final = compacted or sequence == max_rounds or broker.calls >= max_tool_calls
+        force_final = compacted or schema_retry or sequence == max_rounds or broker.calls >= max_tool_calls
         payload = {
             "model": model.get("model"),
             "messages": messages,
@@ -1113,6 +1186,7 @@ def _run_live(
             "tool_choice": "none" if force_final else "auto",
             **provider_options,
         }
+        if schema_retry:payload['tools']=[]
         # UTF-8 bytes plus conservative per-message overhead upper-bound prompt tokens.
         input_bound = (
             len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()) + 512
@@ -1120,7 +1194,7 @@ def _run_live(
         # Valid usage has already settled prior rounds to their actual count.
         # Compact against BOTH the per-round ceiling and the remaining total;
         # a request below 24k can still exceed the 32k cumulative reservation.
-        if input_bound > 24000 or token_used + input_bound + max_output > 32000:
+        if input_bound > input_limit or token_used + input_bound + max_output > total_limit:
             # Keep complete assistant tool-call/result groups together. Only
             # deterministic, already-projected history is compacted; no new IO.
             last_group = next(
@@ -1147,13 +1221,14 @@ def _run_live(
                     "content": "Context budget is nearly exhausted. Return the final required JSON now using supplied frozen evidence. No more tools. Omitted observations remain unknown; do not infer recovery or root cause.",
                 }
             )
+            if retry_feedback:messages.append({'role':'user','content':retry_feedback})
             payload.update(messages=messages, tool_choice="none")
             payload['tools']=[]
             compacted = True
             input_bound = (
                 len(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode()) + 512
             )
-            remaining_input_bound=min(24000,32000-token_used-max_output)
+            remaining_input_bound=min(input_limit,total_limit-token_used-max_output)
             if input_bound > remaining_input_bound:
                 for message in messages:
                     if message.get("role") == "tool":
@@ -1182,7 +1257,7 @@ def _run_live(
             refresh_snapshot_chronology(final_context,sort=True)
             messages[1]['content']=json.dumps(final_context,ensure_ascii=False,separators=(',',':'))
             input_bound=len(json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode())+512
-        if input_bound > 24000 or token_used + input_bound + max_output > 32000:
+        if input_bound > input_limit or token_used + input_bound + max_output > total_limit:
             raise PlatformError(
                 409, "model_token_budget_exhausted", "模型上下文或总Token预算已耗尽。"
             )
@@ -1284,6 +1359,8 @@ def _run_live(
             message = choice["message"]
             tool_calls = message.get("tool_calls") or []
             if tool_calls:
+                if force_final:
+                    raise PlatformError(502,'unexpected_model_tool_call','最终报告轮不允许工具调用，调查已停止。')
                 if not valid_usage:
                     raise PlatformError(
                         409, "model_usage_unknown", "本轮用量未知，停止后续计费调用。"
@@ -1323,7 +1400,18 @@ def _run_live(
                 raise ValueError("missing_content")
             if content.strip().startswith("```"):
                 content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
-            report = validate_report(json.loads(content), cited_ids, expected_version=PROMPT_VERSION)
+            value=json.loads(content)
+            try:
+                report = validate_report(value, cited_ids, expected_version=PROMPT_VERSION)
+            except PlatformError as exc:
+                if (exc.detail.get('code')!='invalid_model_report' or schema_retry
+                        or sequence>=max_rounds or not valid_usage):raise
+                retry_feedback=_schema_retry_feedback(value)
+                schema_retry=True
+                messages.append({'role':'user','content':retry_feedback})
+                call.response={**call.response,'report_schema_retry_requested':True}
+                db.commit()
+                continue
             if compacted:
                 report["unknowns"].append(
                     "部分已提供上下文因预算未带入最后一轮；需核对冻结证据引用。"
