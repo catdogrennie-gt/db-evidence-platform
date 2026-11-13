@@ -20,15 +20,17 @@ from .models import Evidence, MetricFrame, ToolCall, ManifestItem
 
 TOOL_SOURCES = {
     "get_lock_graph": {"mysql.lock_waits", "mysql.transactions", "mysql.sessions"},
-    "get_statement_digests": {"mysql.statement_digest"},
+    "get_statement_digests": {"mysql.statement_digest", "mysql.statement_statistics"},
     "get_schema_metadata": {"mysql.tables", "mysql.indexes", "mysql.configuration"},
     "search_log_events": {
         "mysql.error_log",
         "mysql.slow_log",
         "mysql.slow_log_table",
         "mysql.slow_log_file",
+        "mysql.slow_log.table",
         "host.error_log",
         "host.slow_log",
+        "application.events",
     },
     "get_evidence": None,
     "get_metric_window": set(),
@@ -45,6 +47,8 @@ LOCK_FIELDS = {
     "THREAD_ID",
     "PROCESSLIST_ID",
     "PROCESSLIST_TIME",
+    "transaction_age_seconds",
+    "wait_age_seconds",
 }
 IDENTITY_FIELDS = {
     'waiting_trx_id','blocking_trx_id','waiting_thread_id','blocking_thread_id',
@@ -107,6 +111,21 @@ CONFIG_NUMERIC = {
     "long_query_time",
     "slow_query_log",
     "performance_schema",
+    "max_user_connections","thread_cache_size","table_open_cache",
+    "innodb_redo_log_capacity","innodb_io_capacity","innodb_io_capacity_max",
+    "tmp_table_size","max_heap_table_size","temptable_max_ram","sort_buffer_size",
+    "join_buffer_size","read_buffer_size","read_rnd_buffer_size","max_execution_time",
+    "innodb_lock_wait_timeout","lock_wait_timeout","wait_timeout","interactive_timeout",
+    "min_examined_row_limit","replica_parallel_workers","binlog_expire_logs_seconds",
+    "max_allowed_packet",
+}
+CONFIG_ENUMS = {
+    'slow_query_log':{'ON','OFF'},'performance_schema':{'ON','OFF'},
+    'read_only':{'ON','OFF'},'super_read_only':{'ON','OFF'},
+    'log_queries_not_using_indexes':{'ON','OFF'},
+    'log_output':{'FILE','TABLE','NONE','FILE,TABLE','TABLE,FILE'},
+    'binlog_format':{'ROW','STATEMENT','MIXED'},
+    'transaction_isolation':{'READ-UNCOMMITTED','READ-COMMITTED','REPEATABLE-READ','SERIALIZABLE'},
 }
 
 
@@ -264,7 +283,7 @@ def _verified_requested_lock_attributes(row, payload):
             and all(isinstance(value, dict) for value in rows))
 
 
-def project_evidence(row: Evidence) -> dict:
+def project_evidence(row: Evidence, *, window_start=None, window_end=None) -> dict:
     """Build from field allowlists; never sanitize and forward an entire payload."""
     payload = row.payload if isinstance(row.payload, dict) else {}
     raw_rows = payload.get("rows", [])
@@ -285,12 +304,23 @@ def project_evidence(row: Evidence) -> dict:
             data['reason']='raw_text_not_authorized_for_external_model'
     elif row.source in ("mysql.lock_waits", "mysql.transactions", "mysql.sessions"):
         data["rows"] = [_numeric_fields(r, LOCK_FIELDS) | _structure_fields(r, alias) for r in raw_rows]
+        from .zabbix_diagnostics import definition,CONTRACT
+        declared=definition(payload.get('item') or {})
+        verified_roles=(declared is not None and declared['query']=='locks'
+            and (row.coverage or {}).get('snapshot_contract')==CONTRACT)
+        for raw,projected in zip(raw_rows,data['rows']) if verified_roles else []:
+            for key,values in {
+                'requested_lock_mode':{'X','S','IX','IS','AUTO_INC','X,REC_NOT_GAP','S,REC_NOT_GAP','X,GAP','S,GAP'},
+                'blocking_lock_mode':{'X','S','IX','IS','AUTO_INC','X,REC_NOT_GAP','S,REC_NOT_GAP','X,GAP','S,GAP'},
+                'requested_lock_type':{'RECORD','TABLE'},'blocking_lock_type':{'RECORD','TABLE'},
+            }.items():
+                if isinstance(raw.get(key),str) and raw[key] in values:projected[key]=raw[key]
         if _verified_requested_lock_attributes(row, payload):
             for projected in data['rows']:
                 for name in ('LOCK_TYPE', 'LOCK_MODE', 'LOCK_STATUS'):
                     if name in projected:
                         projected['requested_' + name.lower()] = projected.pop(name)
-    elif row.source == "mysql.statement_digest":
+    elif row.source in ("mysql.statement_digest", "mysql.statement_statistics"):
         data["rows"] = []
         units = payload.get("field_units") or {}
         data["timer_unit"] = "ps" if units.get("SUM_TIMER_WAIT") == "ps" or payload.get("timer_unit") == "picoseconds" else "unknown"
@@ -311,6 +341,26 @@ def project_evidence(row: Evidence) -> dict:
                 str(text).upper(),
             )[:30]
             data["rows"].append(projected)
+    elif row.source in ("mysql.table_io", "mysql.file_io"):
+        data['rows']=[_numeric_fields(r,{'COUNT_READ','COUNT_WRITE','SUM_TIMER_READ',
+            'SUM_TIMER_WRITE','COUNT_FETCH','COUNT_INSERT','COUNT_UPDATE','COUNT_DELETE',
+            'SUM_NUMBER_OF_BYTES_READ','SUM_NUMBER_OF_BYTES_WRITE'}) | _structure_fields(r,alias)
+            for r in raw_rows]
+        if row.source=='mysql.file_io':
+            categories={'innodb_data_file':'data','innodb_log_file':'redo','innodb_temp_file':'temporary',
+                'innodb_dblwr_file':'doublewrite','innodb_clone_file':'clone','innodb_undo_file':'undo'}
+            for raw,projected in zip(raw_rows,data['rows']):
+                name=raw.get('EVENT_NAME')
+                if isinstance(name,str):
+                    ref=alias(name)
+                    if ref:projected['event_ref']=ref
+                    prefix='wait/io/file/innodb/'
+                    if name.startswith(prefix) and name[len(prefix):]in categories:
+                        projected['io_category']=categories[name[len(prefix):]]
+        data['timer_unit']='ps'
+        data['snapshot_scope']='server_cumulative_top_n'
+        data['counter_epoch_known']=False
+        data['interval_delta_available']=False
     elif row.source in ("mysql.tables", "mysql.indexes"):
         data["rows"] = [
             _numeric_fields(
@@ -336,11 +386,32 @@ def project_evidence(row: Evidence) -> dict:
             if r.get("VARIABLE_NAME") in CONFIG_NUMERIC
             and number(r.get("VARIABLE_VALUE")) is not None
         }
+        data['variables'].update({r['VARIABLE_NAME']:r['VARIABLE_VALUE'] for r in raw_rows
+            if r.get('VARIABLE_NAME') in CONFIG_ENUMS
+            and isinstance(r.get('VARIABLE_VALUE'),str)
+            and r['VARIABLE_VALUE'] in CONFIG_ENUMS[r['VARIABLE_NAME']]})
     elif row.source in TOOL_SOURCES["search_log_events"]:
         events = payload.get("events", [])
         events = (
             [v for v in events[:100] if isinstance(v, dict)] if isinstance(events, list) else []
         )
+        excluded_events=0
+        if payload.get('snapshot_scope') in ('last_10m_events','last_5m_events') and (window_start is not None or window_end is not None):
+            retained=[]
+            for event in events:
+                try:stamp=parse_time(event.get('server_event_at'))
+                except (PlatformError,TypeError,ValueError):excluded_events+=1;continue
+                if event.get('event_kind')=='request_window_summary':
+                    try:
+                        interval_start=parse_time(event.get('interval_start_at'))
+                        interval_end=parse_time(event.get('interval_end_at'))
+                    except (PlatformError,TypeError,ValueError):excluded_events+=1;continue
+                    if (window_start is not None and interval_start<window_start) or (window_end is not None and interval_end>=window_end):
+                        excluded_events+=1;continue
+                if (window_start is not None and stamp<window_start) or (window_end is not None and stamp>=window_end):
+                    excluded_events+=1;continue
+                retained.append(event)
+            events=retained
         data = {
             "event_count": len(events),
             "severity_counts": dict(
@@ -351,6 +422,27 @@ def project_evidence(row: Evidence) -> dict:
             )[:20],
             "text_omitted": True,
         }
+        if excluded_events:data['events_outside_requested_window_or_invalid']=excluded_events
+        if row.source=='mysql.slow_log.table':
+            data['events']=[_numeric_fields(event,{'query_time_seconds','lock_time_seconds',
+                'rows_sent','rows_examined'}) for event in events]
+            data['snapshot_scope']='last_10m_events'
+        if payload.get('snapshot_scope') in ('last_10m_events','last_5m_events') and isinstance(payload.get('item'),dict):
+            from .zabbix_diagnostics import definition
+            if definition(payload['item']):
+                data['events']=[]
+                for event in events:
+                    try:stamp=iso(parse_time(event.get('server_event_at')))
+                    except (PlatformError,TypeError,ValueError):continue
+                    data['events'].append({'event_time':stamp,'severity':code(event.get('severity')),
+                        'error_code':code(event.get('error_code')),
+                        **_numeric_fields(event,{'query_time_seconds','lock_time_seconds','rows_sent','rows_examined',
+                            'request_ms','db_ms','pool_wait_ms','request_count','error_count',
+                            'request_max_ms','db_max_ms','pool_wait_max_ms','window_seconds'}),
+                        **({'event_kind':event['event_kind']} if event.get('event_kind')in('request_slow','request_failed','request_window_summary') else{})})
+                    if event.get('event_kind')=='request_window_summary':
+                        data['events'][-1].update({key:event[key]for key in ('interval_start_at','interval_end_at')})
+                data['snapshot_scope']=payload['snapshot_scope']
     elif row.source == "linux.host":
         data["values"] = _numeric_fields(payload.get("values") or {}, METRIC_FIELDS)
     elif row.source in ("mysql.status", "mysql.global_status"):
@@ -644,7 +736,7 @@ class ToolBroker:
                 for row in db.scalars(
                     query.order_by(Evidence.observed_at, Evidence.id).limit(args.limit)
                 ):
-                    projected = project_evidence(row)
+                    projected = project_evidence(row,window_start=lower,window_end=upper)
                     if row.source.startswith('zabbix.item.numeric:'):
                         # observed_at bounds the snapshot, not its history rows.
                         # Clip before counting/sampling, including narrower tool windows.

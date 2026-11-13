@@ -403,7 +403,7 @@ def finding_dimension_supported(db, proposal, items):
             source=evidence.source
             projected=project_evidence(evidence)['data']
             if projected.get('observation_unavailable') or projected.get('payload_omitted'): continue
-            if proposal.category=='sql' and source=='mysql.statement_digest':
+            if proposal.category=='sql' and source in ('mysql.statement_digest','mysql.statement_statistics'):
                 rows=projected.get('rows',[])+projected.get('window',{}).get('rows',[])
                 if any(str(row.get('digest','')).lower()==proposal.dimension.value.lower() for row in rows): return True
             elif proposal.category=='locks' and source in ('mysql.lock_waits','mysql.transactions','mysql.sessions') and any(projected.get('rows',[])): return True
@@ -848,8 +848,9 @@ def overview(actor, **scope):
         reports.get(event.id),tasks.get(reports[event.id].task_id) if event.id in reports else None,
         evidence,episodes,db,reviews.get(event.id)) for event,finding in rows]
     objects=[instance for identifier,instance in instances.items() if identifier in current_ids and instance.enabled and instance.lifecycle_state=='Active']
-    missing=sum(capability['status']!='available' for instance in objects if instance.id in mappings for capability in mappings[instance.id].capabilities)
-    return {'stats':{'current':sum(i['kind']=='current' and i['presentation_kind']=='issue' for i in issues),'risk':sum(i['kind']=='risk' and i['presentation_kind']=='issue' for i in issues),'objects':len(objects)},'issues':issues,'inspection':inspection_projection(db,visible),'coverage':{'status':'partial' if missing else 'unknown','missing_count':missing}}
+    from .collection_coverage import selected_coverage
+    coverage=selected_coverage(objects,mappings,now=utcnow())
+    return {'stats':{'current':sum(i['kind']=='current' and i['presentation_kind']=='issue' for i in issues),'risk':sum(i['kind']=='risk' and i['presentation_kind']=='issue' for i in issues),'objects':len(objects)},'issues':issues,'inspection':inspection_projection(db,visible),'coverage':coverage}
 
 
 def issue_detail(actor, identifier):

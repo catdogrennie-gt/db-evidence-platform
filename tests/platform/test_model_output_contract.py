@@ -91,10 +91,10 @@ def test_real_lock_sources_keep_role_duration_identity_and_chronology_rules():
 def test_prompt_explains_numeric_sql_clues_are_correlation_not_sql_digest_findings():
     from platform_app.investigations import _system_prompt_for_sources
     prompt = _system_prompt_for_sources({'zabbix.item.numeric:measured'})
-    assert "category='sql'只适用于实际digest" in prompt
+    assert "category='sql'仅限实际digest" in prompt
     assert "category='correlation'、dimension.kind='metric'" in prompt
     assert '真实itemid' in prompt
-    assert '没有digest时禁止虚构digest' in prompt
+    assert '缺digest时禁止虚构digest' in prompt
 
 
 def test_truncated_length_response_stays_failed_without_json_repair(ai_env):

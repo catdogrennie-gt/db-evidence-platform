@@ -42,11 +42,17 @@ def _metadata_base(row, host, by_id):
     key=str(row.get('key_',''))[:2048]
     tags=tag_list(row.get('tags'))
     enhancement={'sl.mysql.lock_snapshot':'mysql.lock_waits','dbops.mysql.lock_snapshot':'mysql.lock_waits','sl.mysql.sql_summary':'mysql.statement_digest','dbops.mysql.statement_digest_snapshot':'mysql.statement_digest'}.get(key)
+    from .zabbix_diagnostics import definition
+    diagnostic=definition(row)
+    if diagnostic: enhancement=diagnostic['source']
     return {'hostid':str(row['hostid']),'host_name':str(host.get('name') or host.get('host') or host['hostid'])[:255], 'host_tags':tag_list(host.get('tags')), 'itemid':str(row['itemid']), 'name':str(row.get('name') or key)[:1024], 'key':key, 'units':str(row.get('units',''))[:255], 'unit':str(row.get('units',''))[:255], 'value_type':int(row.get('value_type',0)), 'value_kind':value_kind(row.get('value_type',0)), 'description':str(row.get('description',''))[:4096], 'tags':tags, 'status':str(row.get('status','0')), 'state':str(row.get('state','0')), 'error':str(row.get('error',''))[:1024], 'lastclock':str(row.get('lastclock','0')), 'interval':interval, 'interval_verified':verified, 'available':str(row.get('status','0'))=='0' and str(row.get('state','0'))=='0', 'selectable':True, 'enhancement':enhancement, 'kind':'metric' if value_kind(row.get('value_type',0))=='numeric' else 'snapshot', 'collector':'monitoring'}
 
 
 def metadata(row,host,by_id):
     item=_metadata_base(row,host,by_id)
+    from .zabbix_diagnostics import definition
+    diagnostic=definition(row)
+    if diagnostic:item['diagnostic_query']=diagnostic['query']
     item['value_semantics'],item['semantics_source']=numeric_semantics(row)
     item['poll_interval']=item['interval']; item['history_semantics']='periodic_samples'; item['heartbeat_seconds']=None
     preprocessing=[p for p in row.get('preprocessing',[]) if isinstance(p,dict) and str(p.get('type')) in ('19','20')]

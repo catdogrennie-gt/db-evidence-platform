@@ -6,6 +6,7 @@ import hashlib
 import json
 import time
 from sqlalchemy import select
+from fastapi import HTTPException
 from . import models as m
 from .access import authorize,authorize_system,scoped_instance
 from .common import PlatformError,iso,parse_time
@@ -132,8 +133,44 @@ def item_history(actor,identifier,itemid,start,end,limit,config):
     mapping,instance,source=get_group(actor,identifier)
     if not any(i['itemid']==itemid for i in mapping.items): raise PlatformError(404,'monitoring_item_not_selected','该监控项不属于此对象。')
     client=client_for(source,config); items,_=resolve(client,source,mapping.items); item=next(i for i in items if i['itemid']==itemid)
-    if item['value_kind'] in ('text','log'): authorize(actor,'evidence.read_sensitive',[instance.id])
-    rows,coverage=typed_history(client,item,start,end,min(1000,max(1,limit)))
+    redacted=False
+    if item['value_kind'] in ('text','log'):
+        try:authorize(actor,'evidence.read_sensitive',[instance.id])
+        except HTTPException as exc:
+            if exc.status_code not in (403,404):raise
+            authorize(actor,'data.read',[instance.id])
+            from .zabbix_diagnostics import definition
+            if not definition(item):raise
+            redacted=True
+    rows,coverage=typed_history(client,item,start,end,min(1000,max(1,limit)),latest=item['value_kind'] in ('text','log'))
+    if redacted:
+        from .zabbix_diagnostics import normalize
+        from .tools import project_evidence
+        safe=[]
+        for row in rows:
+            try:
+                diagnostic=normalize(item,json.loads(row['value']))
+                evidence=m.Evidence(id='readonly-diagnostic',instance_id=instance.id,
+                    source=diagnostic['source'],source_mode='live',observed_at=parse_time(row['time']),
+                    payload=diagnostic['payload'],truncated=diagnostic['truncated'],
+                    coverage={**diagnostic['coverage'],'availability':'available'})
+                gaps=[*diagnostic['coverage'].get('capture_gaps',[]),
+                    *(['late_arrival_possible']if diagnostic['coverage'].get('late_arrival_possible')else[]),
+                    *(['ring_coverage_unverified']if diagnostic['coverage'].get('ring_coverage_unverified')else[]),
+                    *(['diagnostic_snapshot_truncated']if diagnostic['truncated']else[])]
+                evidence.coverage={**evidence.coverage,'complete':not gaps,'gaps':gaps}
+                projected=project_evidence(evidence,window_start=start,window_end=end)
+                safe.append({**row,'value':projected['data'],'diagnostic_coverage':projected['coverage']})
+                coverage['truncated']=coverage['truncated'] or diagnostic['truncated']
+                if gaps:
+                    coverage['complete']=False
+                    coverage['reason_codes']=sorted(set([*coverage['reason_codes'],*gaps]))
+            except (ValueError,TypeError,PlatformError):
+                safe.append({**row,'value':None,'validity':'invalid_diagnostic'})
+                coverage['complete']=False
+                coverage['reason_codes']=sorted(set([*coverage['reason_codes'],'diagnostic_snapshot_invalid']))
+        rows=safe
+        coverage['representation']='redacted_diagnostics'
     return {'item':item,'kind':item['value_kind'],'rows':rows,'coverage':coverage,'provenance':provenance(source,mapping,instance,item)}
 
 
@@ -232,7 +269,31 @@ def _collect_group(db,instance,mapping,source,lease,config,client):
         coverage.update(provenance(source,mapping,instance,item)); coverage['complete']=fresh and coverage['complete'] and item['interval_verified']; coverage['gaps']=coverage['reason_codes']
         identity=hashlib.sha256((source.id+':'+item['hostid']+':'+item['itemid']).encode()).hexdigest()[:24]
         entries.append({'source':'zabbix.item.'+item['value_kind']+':'+identity,'observed_at':iso(stamp),'payload':{'item':item,'rows':rows[-100:] if item['value_kind']=='numeric' else rows[-8:]},'availability':'available' if fresh else 'stale' if rows else 'unknown','coverage':coverage,'truncated':coverage['truncated']})
-        if item.get('enhancement') and rows:
+        from .zabbix_diagnostics import definition,normalize
+        if definition(item) and rows:
+            try:
+                diagnostic=normalize(item,json.loads(rows[-1]['value']))
+            except (ValueError,TypeError):
+                coverage['complete']=False
+                coverage['reason_codes'].append('diagnostic_snapshot_invalid')
+            else:
+                diagnostic['observed_at']=iso(stamp)
+                diagnostic['availability']='available' if fresh else 'stale'
+                diagnostic['coverage']={**coverage,**diagnostic['coverage']}
+                if diagnostic['coverage'].get('capture_gaps'):
+                    diagnostic['coverage']['complete']=False
+                    diagnostic['coverage']['gaps']=[*coverage['gaps'],*diagnostic['coverage']['capture_gaps']]
+                if diagnostic['coverage'].get('late_arrival_possible') or diagnostic['coverage'].get('ring_coverage_unverified'):
+                    diagnostic['coverage']['complete']=False
+                    diagnostic['coverage']['gaps']=[*diagnostic['coverage'].get('gaps',[]),
+                        *(['late_arrival_possible']if diagnostic['coverage'].get('late_arrival_possible')else[]),
+                        *(['ring_coverage_unverified']if diagnostic['coverage'].get('ring_coverage_unverified')else[])]
+                diagnostic['truncated']=diagnostic['truncated'] or coverage['truncated']
+                if not diagnostic['coverage']['snapshot_complete']:
+                    diagnostic['coverage']['complete']=False
+                    diagnostic['coverage']['gaps']=[*diagnostic['coverage'].get('gaps',[]),'diagnostic_snapshot_truncated']
+                entries.append(diagnostic)
+        elif item.get('enhancement') and rows:
             try: parsed=json.loads(rows[-1]['value'])
             except (ValueError,TypeError): parsed=None
             if isinstance(parsed,dict) and isinstance(parsed.get('rows'),list):

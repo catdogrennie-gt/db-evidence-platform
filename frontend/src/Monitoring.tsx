@@ -20,7 +20,7 @@ import { api, pageItems, query, rows, text } from './api';
 import type { Page, Row, TaskRef } from './api';
 import { errorMessage, useCan, useResource, useScope, useScopedPath } from './hooks';
 import { ContextLink, ErrorNotice, LoadState, Status, Time, Title } from './ui';
-import { AccessNotice, CapabilityList, InspectionStatus, MetricPanel } from './Intelligence';
+import { AccessNotice, InspectionStatus, MetricPanel } from './Intelligence';
 import { AnalysisGroups, ItemHistory } from './AnalysisGroups';
 import { scopeKey, selectionForScope, sourcePayload } from './intelligenceModel';
 import type {
@@ -302,7 +302,7 @@ export function MetricsDashboard() {
         description="查询当前上游历史，与报告冻结证据分开显示。按相同时间窗口对照数据库、主机与网络信号。"
         actions={
           <ContextLink to="/monitoring">
-            <Button>管理联合分析对象</Button>
+            <Button>{can('asset.manage') ? '管理联合分析对象' : '查看联合分析对象'}</Button>
           </ContextLink>
         }
       />
@@ -395,10 +395,7 @@ function ObjectMetricView({ id, group }: { id: string; group: AnalysisGroup }) {
               />
             </div>
             <section className="intel-details"><h3>原始历史、文本与日志</h3><Select showSearch allowClear optionFilterProp="label" placeholder="选择一个监控项查看原始历史" value={itemId} onChange={setItemId} options={group.items.map(item => ({ value: item.itemid, label: `${item.host_name} · ${item.name}` }))} style={{ width: '100%' }} />{item && <ItemHistory key={`${item.itemid}:${scope.from}:${scope.to}`} group={group} item={item} />}</section>
-            <details className="intel-details">
-              <summary>查看对象能力与缺口</summary>
-              <CapabilityList capabilities={resource.data.capabilities} />
-            </details>
+            <p className="intel-muted">当前已选 {group.items.length} 个监控项；曲线与原始历史分别查看，采样缺口在各项覆盖信息中说明。</p>
             {charts.length ? (
               <div className="intel-metrics-grid">
                 {charts.map((chart) => (

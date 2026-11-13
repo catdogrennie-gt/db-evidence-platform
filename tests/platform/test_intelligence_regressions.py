@@ -162,9 +162,10 @@ def test_explicit_structured_finding_creates_unverified_result_without_threshold
     assert any(node['kind']=='hypothesis' and '锁等待与事务延迟' in node['label'] for node in detail['nodes'])
 
 
-def test_sql_findings_require_actual_distinct_frozen_digest_dimensions(ai_env):
+@pytest.mark.parametrize('statement_source',['mysql.statement_digest','mysql.statement_statistics'])
+def test_sql_findings_require_actual_distinct_frozen_digest_dimensions(ai_env,statement_source):
     e=ai_env
-    evidence=m.Evidence(instance_id=e['a'].id,run_id=e['evidence'].run_id,source='mysql.statement_digest',observed_at=e['start'],coverage={'availability':'available','complete':True},payload={'rows':[{'DIGEST':'a'*64},{'DIGEST':'b'*64}]},payload_sha256='c'*64)
+    evidence=m.Evidence(instance_id=e['a'].id,run_id=e['evidence'].run_id,source=statement_source,observed_at=e['start'],coverage={'availability':'available','complete':True},payload={'rows':[{'DIGEST':'a'*64},{'DIGEST':'b'*64}]},payload_sha256='c'*64)
     evidence.payload_sha256=digest(evidence.payload)
     e['db'].add(evidence);e['db'].flush()
     valid=[proposal(e,category='sql',dimension={'kind':'sql_digest','value':value*64},refs=[evidence.id]) for value in ('a','b')]

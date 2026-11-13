@@ -274,6 +274,76 @@ def test_optional_digest_snapshot_preserves_units_without_inventing_epoch(group_
     assert 'private_table' not in json.dumps(result) and 'token=secret' not in json.dumps(result)
 
 
+def test_readonly_user_reads_sanitized_diagnostic_history_but_not_other_raw_text(group_env):
+    from platform_app.analysis_groups import save_group,item_history
+    e=group_env
+    row=e['fake'].items[2]
+    row.update(key_='mysql.custom.query[DbA,,,configuration]',tags=[{'tag':'dbe.contract','value':'mysql-diagnostics-v1'},{'tag':'dbe.query','value':'configuration'}])
+    payload={'producer_contract':'db-evidence-mysql-diagnostics-v1','query_name':'configuration',
+             'rows':[{'VARIABLE_NAME':'max_connections','VARIABLE_VALUE':40},{'VARIABLE_NAME':'password','VARIABLE_VALUE':'DO-NOT-SEND'}],
+             'snapshot_complete':True,'snapshot_truncated':False,'returned_row_count':2}
+    original=e['fake'].call
+    def history(method,params):
+        if method=='history.get':return [{'clock':str(int(utcnow().replace(tzinfo=timezone.utc).timestamp())-1),'value':json.dumps(payload),'ns':'0'}]
+        return original(method,params)
+    e['fake'].call=history
+    group=save_group(e['actor'],e['config'],dict(e['body'],items=[{'hostid':'102','itemid':'13'}],relations=[]));e['db'].commit()
+    role=e['db'].scalar(select(m.Role).where(m.Role.name=='ai-test'))
+    role.permissions=[p for p in role.permissions if p!='evidence.read_sensitive'];e['db'].commit()
+    end=utcnow();result=item_history(e['actor'],group['id'],'13',end-timedelta(minutes=10),end,100,e['config'])
+    assert result['coverage']['representation']=='redacted_diagnostics'
+    assert result['rows'][0]['value']['variables']=={'max_connections':40}
+    assert 'DO-NOT-SEND' not in json.dumps(result)
+    row.update(key_='mysql.custom.query[DbA,,,slow_log]',tags=[{'tag':'dbe.contract','value':'mysql-diagnostics-v1'},{'tag':'dbe.query','value':'slow_log'}])
+    payload.update(query_name='slow_log',rows=[],returned_row_count=0)
+    result=item_history(e['actor'],group['id'],'13',end-timedelta(minutes=10),end,100,e['config'])
+    assert result['coverage']['complete'] is False
+    assert 'late_arrival_possible' in result['coverage']['reason_codes']
+    assert result['rows'][0]['diagnostic_coverage']['complete'] is False
+    assert 'late_arrival_possible' in result['rows'][0]['diagnostic_coverage']['gaps']
+    row['key_']='custom.13'
+    with pytest.raises(HTTPException)as denied:item_history(e['actor'],group['id'],'13',end-timedelta(minutes=10),end,100,e['config'])
+    assert denied.value.status_code==403
+
+
+@pytest.mark.parametrize('malformed',[False,True])
+def test_fixed_zabbix_diagnostic_pack_is_selected_fenced_and_not_raw_model_text(group_env,malformed):
+    from platform_app.analysis_groups import save_group
+    from platform_app.monitoring import handle_collection
+    from platform_app.scheduling import enqueue,claim
+    from platform_app.tools import project_evidence
+    from platform_app.evidence import digest
+    e=group_env
+    row=e['fake'].items[2]
+    row.update(key_='mysql.custom.query[DbA,,,configuration]',tags=[
+        {'tag':'dbe.contract','value':'mysql-diagnostics-v1'},
+        {'tag':'dbe.query','value':'configuration'}])
+    payload={'producer_contract':'db-evidence-mysql-diagnostics-v1','query_name':'configuration',
+             'rows':[{'VARIABLE_NAME':'max_connections','VARIABLE_VALUE':'40'},
+                     {'VARIABLE_NAME':'password','VARIABLE_VALUE':'DO-NOT-SEND'}],
+             'snapshot_complete':True,'snapshot_truncated':False,'returned_row_count':2}
+    if malformed:payload['query_name']='different_query'
+    original=e['fake'].call
+    def history(method,params):
+        if method=='history.get':return [{'clock':str(int(utcnow().replace(tzinfo=timezone.utc).timestamp())-1),'value':json.dumps(payload),'ns':'0'}]
+        return original(method,params)
+    e['fake'].call=history
+    group=save_group(e['actor'],e['config'],dict(e['body'],items=[{'hostid':'102','itemid':'13'}],relations=[]))
+    enqueue(e['db'],'collect_instance',instance_id=group['instance_id'],payload={'config_revision':group['config_revision'],'collectors':['monitoring']});e['db'].commit()
+    lease=claim(e['factory'],'diagnostic-group','collection');handle_collection(e['factory'],lease,e['config']);e['db'].expire_all()
+    rows=list(e['db'].scalars(select(m.Evidence).where(m.Evidence.instance_id==group['instance_id'])))
+    typed=next((r for r in rows if r.source=='mysql.configuration'),None)
+    if malformed:
+        assert typed is None
+        assert 'diagnostic_snapshot_invalid' in rows[0].coverage['gaps']
+    else:
+        assert typed is not None and typed.sensitivity=='restricted'
+        assert typed.payload_sha256==digest(typed.payload)
+        assert project_evidence(typed)['data']['variables']=={'max_connections':40}
+        assert 'DO-NOT-SEND' not in json.dumps(project_evidence(typed))
+    assert {p['itemids'][0] for method,p in e['fake'].calls if method=='history.get'} <= {'13'}
+
+
 @pytest.mark.parametrize('missing_last,active_lock',[(False,False),(True,False),(False,True)])
 @pytest.mark.parametrize('total_budget_pressure',[False,True])
 def test_real_model_payload_keeps_large_group_numeric_context_and_frozen_tool(group_env,missing_last,active_lock,total_budget_pressure):

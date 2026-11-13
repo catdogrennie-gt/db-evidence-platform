@@ -335,23 +335,24 @@ interface HistoryResult { item: ZabbixItem; kind: ZabbixItem['value_kind']; rows
 export function ItemHistory({ group, item }: { group: AnalysisGroup; item: ZabbixItem }) {
   const { scope, refresh } = useScope();
   const can = useCan();
-  const permitted = !['text', 'log'].includes(item.value_kind) || can('evidence.read_sensitive');
+  const permitted = !['text', 'log'].includes(item.value_kind) || can('evidence.read_sensitive') || Boolean(item.diagnostic_query);
   const resource = useResource<HistoryResult>(permitted ? `/monitoring/groups/${group.id}/items/${item.itemid}/history?${query({ from: scope.from, to: scope.to, limit: 100 })}` : null, refresh);
   const coverage = analysisHistoryCoverage(resource.data?.coverage ?? {});
   function renderValue(value: unknown): string {
     if (value === null || value === undefined) return '未返回值';
-    return typeof value === 'string' ? value : JSON.stringify(value);
+    return typeof value === 'string' ? value : JSON.stringify(value, null, 2);
   }
   if (!permitted) return <Alert type="info" showIcon title="查看文本或日志原文需要敏感证据读取权限" description="当前可以查看监控项元数据和数值图表。原文未请求；这属于权限限制，不表示没有采集到数据。" />;
   return <LoadState {...resource} retry={resource.reload}>{resource.data && <>
     <Space wrap><Tag>{kindLabels[resource.data.kind]}</Tag><Tag>{item.units || '未设置单位'}</Tag><ItemState item={resource.data.item ?? item} /></Space>
+    {resource.data.coverage?.representation === 'redacted_diagnostics' && <Alert type="info" showIcon title="只读诊断视图" description="展示配置、性能统计和日志事件的脱敏信息；数据库对象名称、SQL 和日志正文不公开。" />}
     {resource.data.kind === 'unsupported' && <Alert type="warning" showIcon title="此值类型暂不参与数值分析" description="监控项身份和元数据保留；不会将二进制或未知内容当成数值。" />}
     <div className="analysis-history-meta"><span>覆盖状态：{coverage.label}</span><span>返回 {resource.data.rows.length} 条，单次最多 100 条</span>{resource.data.coverage?.truncated ? <Tag color="warning">历史已截断</Tag> : null}</div>
     {coverage.reasons.length > 0 && <Alert type="warning" showIcon title="历史覆盖说明" description={coverage.reasons.join('；')} />}
     {(resource.data.item?.history_semantics ?? item.history_semantics) === 'sparse_on_change' && <p className="intel-muted">此项按值变化或心跳保留历史；没有新记录不等于采集失败。不会用旧值补写当前数据。</p>}
     <Table<HistoryRow> size="small" rowKey={(row, index) => `${row.clock}:${row.ns}:${index}`} dataSource={resource.data.rows} pagination={{ pageSize: 10, showSizeChanger: false }} columns={[
       { title: '实际采样时间', width: 200, render: (_, row) => <Time value={row.time ?? (Number(row.clock) > 0 ? new Date(Number(row.clock) * 1000).toISOString() : undefined)} /> },
-      { title: '原始值', render: (_, row) => <pre className="analysis-history-value">{renderValue(row.value)}</pre> },
+      { title: resource.data.coverage?.representation === 'redacted_diagnostics' ? '诊断数据' : '原始值', render: (_, row) => <pre className="analysis-history-value">{renderValue(row.value)}</pre> },
       ...(resource.data.kind === 'log' ? [{ title: '日志元数据', width: 240, render: (_: unknown, row: HistoryRow) => <div className="analysis-log-metadata">
         <div>来源：{row.source ?? '未提供'}</div><div>级别：{row.severity ?? '未提供'}</div>
         <div>事件 ID：{row.logeventid ?? '未提供'}</div><div>日志时间戳：{row.timestamp ?? '未提供'}</div>

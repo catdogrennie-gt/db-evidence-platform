@@ -1,5 +1,6 @@
 import { ExecutiveSummary } from './ExecutiveSummary';
 import { FrozenRuleFacts } from './FrozenRuleFacts';
+import { CoverageNotice } from './CoverageNotice';
 export { ExecutiveSummary } from './ExecutiveSummary';
 import { useEffect, useId, useMemo, useState } from 'react';
 import {
@@ -160,16 +161,7 @@ export function IntelligenceHome() {
                   </Card>
                 ))}
               </div>
-              {data.coverage.status !== 'complete' && data.coverage.status !== 'available' && (
-                <Alert
-                  className="intel-gap-banner"
-                  type="warning"
-                  showIcon
-                  title="监控资料存在覆盖缺口"
-                  description={`${data.coverage.missing_count ?? '未知'} 项来源或能力缺口；没有发现问题不代表这些对象已确认健康。`}
-                  action={<ContextLink to="/monitoring">查看覆盖</ContextLink>}
-                />
-              )}
+              <CoverageNotice coverage={data.coverage} />
               {data.stats.objects === 0 ? (
                 <Card className="intel-first-run">
                   <Empty description="当前范围尚未纳入联合分析对象" />
@@ -842,9 +834,9 @@ export function IssueReport() {
                   <ReportEvidence data={data} onMetricReference={setSelectedReference} />
                 </div>
                 <aside className="intel-report-aside">
-                  <Card title="已核对与覆盖">
-                    <CapabilityList capabilities={data.checks ?? []} />
-                    <ContextLink to="/monitoring">查看对象与能力 →</ContextLink>
+                  <Card title="报告覆盖与限制">
+                    <SourceCoverage data={data.report ? { coverage: data.report.coverage } : undefined} />
+                    {data.event_subject && <ContextLink to={`/metrics?${query({ instance_id: data.event_subject.id })}`}>查看该对象的数据 →</ContextLink>}
                   </Card>
                   <Card title="下一步只读检查">
                     {data.next_checks?.length ? (

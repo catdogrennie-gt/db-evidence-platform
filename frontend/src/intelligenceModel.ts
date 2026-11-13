@@ -133,7 +133,7 @@ export interface IntelligenceOverview {
     mode?: string;
     reason?: string;
   };
-  coverage: { status: string; missing_count: number };
+  coverage: import('./CoverageNotice').CoverageSummary;
 }
 export interface MonitoringSource {
   id: string;
@@ -164,6 +164,7 @@ export interface ZabbixItem {
   value_kind: 'numeric' | 'text' | 'log' | 'unsupported';
   selectable?: boolean;
   enhancement?: string | null;
+  diagnostic_query?: string;
   history_semantics?: string;
   heartbeat_seconds?: number | null;
   poll_interval?: number | null;

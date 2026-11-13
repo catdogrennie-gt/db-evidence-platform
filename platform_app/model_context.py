@@ -109,7 +109,8 @@ def refresh_snapshot_chronology(container, *, item_key='evidence', sort=False):
     for item in rows:
         # A retained history curve is not an empty/nonempty SQL/log snapshot.
         if (str(item.get('source','')).startswith('zabbix.item.numeric:')
-                or item.get('source')=='mysql.statement_digest'): continue
+                or item.get('source') in ('mysql.statement_digest','mysql.statement_statistics',
+                    'mysql.table_io','mysql.file_io','mysql.configuration')): continue
         data = item.get('data') or {}
         if data.get('text_omitted') or data.get('observation_unavailable'): continue
         count = data.get('row_count')

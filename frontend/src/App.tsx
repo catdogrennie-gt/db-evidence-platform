@@ -190,7 +190,7 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
   const [rolling, setRolling] = useState(() => initialRollingWindow(location.pathname, location.search));
   const [logoutError, setLogoutError] = useState<unknown>();
   const initial = useMemo(
-    () => ({ from: new Date(Date.now() - 3600000).toISOString(), to: new Date().toISOString() }),
+    () => ({ from: new Date(Date.now() - 7 * 86400000).toISOString(), to: new Date().toISOString() }),
     [],
   );
   const rollingWindow = useRef(initial);
@@ -229,7 +229,8 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
   useEffect(() => {
     if (!rollingActive) return;
     const interval = setInterval(() => {
-      const next = { from: new Date(Date.now() - 3600000).toISOString(), to: new Date().toISOString() };
+      const duration = new Date(rollingWindow.current.to).getTime() - new Date(rollingWindow.current.from).getTime();
+      const next = { from: new Date(Date.now() - duration).toISOString(), to: new Date().toISOString() };
       rollingWindow.current = next;
       setSearch(
         (p) => {
@@ -431,14 +432,14 @@ function Shell({ actor, onLogout }: { actor: Actor; onLogout: () => void }) {
                   onClick={() => {
                     setRolling(false);
                     setSearch((p) => {
-                      p.set('from', new Date(Date.now() - 3600000).toISOString());
+                      p.set('from', new Date(Date.now() - 7 * 86400000).toISOString());
                       p.set('to', new Date().toISOString());
                       return p;
                     });
                     setRefresh((v) => v + 1);
                   }}
                 >
-                  最近 1 小时
+                  最近 7 天
                 </Button>
               </Space>
               <Space>
