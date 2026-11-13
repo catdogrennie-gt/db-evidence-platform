@@ -855,11 +855,11 @@ export function IssueReport() {
                         to={`/metrics?${query({ instance_id: object.id, report: data.id, ...(data.window ?? {}) })}`}
                       >
                         <Button block className="intel-current-metric">
-                          查看{object.name}当前指标 ↗
+                          查看{object.name}时段指标 ↗
                         </Button>
                       </ContextLink>
                     ))}
-                    <small>当前指标是新查询，与报告冻结依据分开显示。</small>
+                    <small>此处重新查询上游历史，时间范围以数据页顶部为准；报告的冻结证据保持不变。</small>
                   </Card>
                   <Card title="未知与反证">
                     <TextItems

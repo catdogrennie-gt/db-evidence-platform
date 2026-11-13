@@ -299,7 +299,7 @@ export function MetricsDashboard() {
     <div className="intel-page">
       <Title
         title="数据查看"
-        description="查询当前上游历史，与报告冻结证据分开显示。按相同时间窗口对照数据库、主机与网络信号。"
+        description="按所选时间范围重新查询上游历史，与报告冻结证据分开显示。可同窗对照数据库、主机与网络信号。"
         actions={
           <ContextLink to="/monitoring">
             <Button>{can('asset.manage') ? '管理联合分析对象' : '查看联合分析对象'}</Button>
@@ -313,7 +313,7 @@ export function MetricsDashboard() {
           <Alert
             type="info"
             showIcon
-            title="当前历史查询"
+            title="上游历史查询"
             description="本页使用顶部时间范围读取监控来源。它不会改变已有报告；空缺与无效采样保留断点。"
           />
           <LoadState {...resource} retry={resource.reload}>
@@ -358,7 +358,7 @@ export function MetricsDashboard() {
       )}
       {search.get('report') && (
         <p className="intel-muted">
-          来自报告的指标下钻。本页显示当前查询结果，报告本身的固定依据保持不变。
+          来自报告的指标下钻。按顶部时间范围重新查询上游历史；报告本身的冻结证据保持不变。
         </p>
       )}
     </div>
