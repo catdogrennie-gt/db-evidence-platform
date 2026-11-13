@@ -949,6 +949,8 @@ def issue_detail(actor, identifier):
     result.update(window={'from':iso(inv.window_start),'to':iso(inv.window_end)} if inv else None,report=report,nodes=nodes,edges=edges,charts=charts,checks=checks.capabilities if checks else [],next_checks=(report or {}).get('next_readonly_checks',[]),unknowns=(report or {}).get('unknowns',['尚无已完成的证据分析']),refutations=(report or {}).get('refutations',[]),history=visible_history)
     from .report_facts import frozen_facts
     result['frozen_facts'] = frozen_facts(actor, inv) if inv else []
+    from .report_observation_bounds import frozen_observation_bounds
+    result['observation_bounds'] = frozen_observation_bounds(actor, inv) if inv else None
     return result
 
 

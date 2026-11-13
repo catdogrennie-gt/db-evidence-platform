@@ -8,6 +8,7 @@ import { ContextLink, FieldGrid, LoadState, RecordCard, SourceCoverage, Status, 
 import { Evidence } from './Workflow';
 import { InvestigationReportView, ManifestButton, VerificationReportView, EventSummaryView } from './Presentation';
 import { ExecutiveSummary } from './ExecutiveSummary';
+import type { ObservationBoundsData } from './ObservationBounds';
 import { FrozenRuleFacts } from './FrozenRuleFacts';
 import type { FrozenRuleFact } from './intelligenceModel';
 import { FrozenMetricDrawer } from './Intelligence';
@@ -26,7 +27,7 @@ export function HistoricalInvestigationReport({ data, onMetricReference }: { dat
     {!['completed', 'succeeded'].includes(String(data.status)) && <Alert type="warning" showIcon title="分析尚未成功完成" description="保留输出不能代表当前诊断已完成。" />}
     {!['completed', 'succeeded'].includes(String(data.status)) && !report?.executive_summary
       ? <Alert type="info" showIcon title="本轮未生成结论摘要" description="原始内容按原样保留；不根据事实列表补写模型结论。" />
-      : <ExecutiveSummary report={report ?? null} mode={String(data.mode)} onMetricReference={onMetricReference} />}
+      : <ExecutiveSummary report={report ?? null} mode={String(data.mode)} observationBounds={data.observation_bounds as ObservationBoundsData | undefined} onMetricReference={onMetricReference} />}
     <details className="intel-details"><summary>分析过程与全部原始引用</summary><InvestigationReportView data={report ?? data.summary} onMetricReference={onMetricReference} /></details>
     <details className="intel-details"><summary>完整问题、元数据与审计</summary>
       <section className="intel-text-items"><h3>完整分析问题</h3><p className="prose">{String(data.question ?? '原记录未提供分析问题。')}</p></section>

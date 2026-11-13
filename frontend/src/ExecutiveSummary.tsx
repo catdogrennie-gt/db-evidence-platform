@@ -1,6 +1,7 @@
 import { Alert, Card, Tag } from 'antd';
 import type { Row } from './api';
 import { StatementRefs } from './Presentation';
+import { ObservationBounds, type ObservationBoundsData } from './ObservationBounds';
 
 export interface SummaryClaim {
   status: 'observed' | 'supported_hypothesis' | 'insufficient_evidence' | 'not_applicable' | 'refuted';
@@ -29,7 +30,7 @@ export interface ExecutiveSummaryData {
 const statuses = { observed: '已观察', supported_hypothesis: '有依据的候选解释', insufficient_evidence: '证据不足', not_applicable: '不适用', refuted: '已有反证' };
 const risks = { low: '低风险', medium: '中风险', high: '高风险', unknown: '风险未知' };
 function ClaimStatus({ claim }: { claim: SummaryClaim }) {
-  return <Tag color={claim.status === 'observed' ? 'blue' : claim.status === 'supported_hypothesis' ? 'gold' : 'default'}>{statuses[claim.status] ?? '状态未知'}</Tag>;
+  return <Tag color={claim.status === 'observed' ? 'blue' : claim.status === 'supported_hypothesis' ? 'gold' : 'default'}>AI 标注：{statuses[claim.status] ?? '状态未知'}</Tag>;
 }
 function ActionBadges({ action }: { action: SummaryAction }) {
   return <div className="executive-action-badges"><Tag>{{ readonly_check: '只读检查', manual_change: '人工变更建议', observe: '继续观察' }[action.kind]}</Tag><Tag color={action.risk === 'high' ? 'red' : action.risk === 'medium' ? 'gold' : 'default'}>{risks[action.risk] ?? '风险未知'}</Tag>{(action.requires_human_approval || action.kind === 'manual_change') && <Tag color="orange">需要人工批准</Tag>}</div>;
@@ -41,10 +42,11 @@ function Claim({ title, claim, onMetricReference }: { title: string; claim: Summ
     {!!claim.unknowns?.length && <p className="intel-muted">尚未确认：{claim.unknowns.join('；')}</p>}
   </section>;
 }
-export function ExecutiveSummary({ report, onMetricReference, mode }: { report: Row | null; onMetricReference?: (ref: string) => void; mode?: string }) {
+export function ExecutiveSummary({ report, onMetricReference, mode, observationBounds }: { report: Row | null; onMetricReference?: (ref: string) => void; mode?: string; observationBounds?: ObservationBoundsData | null }) {
   const summary = report?.executive_summary as ExecutiveSummaryData | undefined;
   if (!summary || mode === 'rules_only') return <Alert showIcon type="info" title={mode === 'rules_only' ? '规则报告未生成模型执行摘要' : report ? '旧版未生成完整结论摘要' : '报告尚未生成执行摘要'} description="原始内容按原样保留；不根据事实列表补写模型结论。" />;
   return <Card className="executive-summary" title="AI分析">
+    <ObservationBounds data={observationBounds} onMetricReference={onMetricReference} />
     <p className="intel-muted">以下为 AI 对原因的解释与建议，不替代已确认事实；原始判断按原文保留。</p>
     <h2>{summary.headline}</h2>
     <div className="executive-verdict"><strong>AI判断</strong><ClaimStatus claim={summary.conclusion} /><p>{summary.conclusion.statement}</p></div>

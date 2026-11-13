@@ -1485,6 +1485,8 @@ def investigation_detail(actor, row, *, include_audit=True, include_facts=True):
         from .report_facts import frozen_facts
 
         result['frozen_facts'] = frozen_facts(actor, row)
+        from .report_observation_bounds import frozen_observation_bounds
+        result['observation_bounds'] = frozen_observation_bounds(actor, row)
     calls = list(
         db.scalars(
             select(ModelCall)

@@ -1015,7 +1015,7 @@ export function ReportEvidence({ data, onMetricReference }: { data: IssueDetail;
       description={<><p>{data.summary}</p><small>实际观测 <Time value={data.report_freshness?.event_updated_at ?? data.updated_at} />。下方 AI 报告解释其标注的历史时间窗。</small></>}
     />}
     {data.report && state !== 'ready' && <Alert type="warning" showIcon title="保留的历史输出" description="本次分析尚未成功完成，以下已保留内容不能代表当前问题已完成诊断。" />}
-    <ExecutiveSummary report={data.report} mode={data.analysis_mode} onMetricReference={onMetricReference} />
+    <ExecutiveSummary report={data.report} mode={data.analysis_mode} observationBounds={data.observation_bounds} onMetricReference={onMetricReference} />
     {data.report && <details className="intel-details intel-report-prose"><summary>分析过程与原始报告</summary><InvestigationReportView data={data.report} onMetricReference={onMetricReference} /></details>}
     {!!data.nodes?.length && <details className="intel-details"><summary>证据关系 · {data.nodes.length} 个节点</summary><EvidenceGraph nodes={data.nodes} edges={data.edges ?? []} investigationId={data.investigation_id} onMetricReference={onMetricReference ?? (() => {})} category={data.issue_category} subjectId={data.event_subject?.id ?? data.instance_ids?.[0]} /></details>}
     {!!charts.length && <MoreFrozenCharts charts={charts} />}

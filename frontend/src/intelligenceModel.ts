@@ -1,4 +1,5 @@
 import type { Row } from './api';
+import type { ObservationBoundsData } from './ObservationBounds';
 
 export interface Capability {
   name: string;
@@ -99,6 +100,7 @@ export interface FrozenRuleFact {
   };
 }
 export interface IssueDetail extends Issue {
+  observation_bounds?: ObservationBoundsData | null;
   frozen_facts?: FrozenRuleFact[];
   report_status?: string;
   window: { from: string; to: string } | null;
