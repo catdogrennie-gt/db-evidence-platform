@@ -1109,7 +1109,7 @@ def _run_live(
     )
     # Keep the hard 24k per-round bound, including repeated tool schemas and JSON
     # string escaping. Prioritize actual lock edges before trimming initial data.
-    from .model_context import compact_initial,context_refs,bounded_tool_result,refresh_snapshot_chronology,prepare_tool_context,trim_numeric_summary,compact_final_context,snapshot_identity
+    from .model_context import compact_initial,context_refs,bounded_tool_result,refresh_snapshot_chronology,prepare_tool_context,trim_numeric_summary,compact_final_context,snapshot_identity,snapshot_boundary_refs
     initial = compact_initial(bundle)
     messages[0]['content'] = _system_prompt_for_sources(available_sources,context=initial)
     trigger_ids={ref for signal in initial.get('inspection_signals',[]) for ref in signal.get('evidence_ids',[])} | set(required_ids)
@@ -1127,7 +1127,7 @@ def _run_live(
         layer=snapshot_identity(item)
         if layer not in seen_layers:
             seen_layers.add(layer);representative_ids.add(item['evidence_id'])
-    protected_ids=trigger_ids | latest_ids | representative_ids | {item['evidence_id'] for item in initial['evidence'] if item.get('selection_reason')=='nonempty_lock_snapshot'}
+    protected_ids=trigger_ids | latest_ids | representative_ids | snapshot_boundary_refs(initial['evidence']) | {item['evidence_id'] for item in initial['evidence'] if item.get('selection_reason')=='nonempty_lock_snapshot'}
     lock_question="locks" in _safe_question(investigation.question)
     initial["evidence"].sort(key=lambda item:(item['evidence_id'] not in trigger_ids,
                                               item.get('selection_reason')!='nonempty_lock_snapshot',

@@ -101,6 +101,47 @@ def snapshot_identity(item):
             meta.get('source_id'),meta.get('hostid'),meta.get('itemid'))
 
 
+def snapshot_boundary_refs(items):
+    """Protect nearest supplied observations, never infer continuity/recovery.
+
+    Only source-qualified point snapshots participate. An empty numeric curve,
+    unknown source identity or unavailable sample is not a normal counterexample.
+    This pure selector cannot recover evidence omitted before this projection.
+    """
+    groups = {}
+    for item in items:
+        if item.get('source') not in ('mysql.lock_waits','mysql.transactions','mysql.sessions'):
+            continue
+        data = item.get('data') or {}
+        if (item.get('source_mode') != 'live'
+                or (item.get('coverage') or {}).get('availability') != 'available'
+                or data.get('observation_unavailable') or data.get('text_omitted')
+                or data.get('snapshot_complete') is False
+                or data.get('snapshot_truncated') is True):
+            continue
+        identity = snapshot_identity(item)
+        if (not all(isinstance(value,str) and value for value in (*identity[:2],*identity[3:]))
+                or identity[2] is not None and not isinstance(identity[2],str)):
+            continue
+        ref, count, stamp = item.get('evidence_id'), data.get('row_count'), _snapshot_time(item)
+        if not isinstance(ref,str) or not ref or type(count) is not int or count < 0 or stamp is None:
+            continue
+        groups.setdefault(identity, []).append((stamp,ref,count))
+    protected = set()
+    for rows in groups.values():
+        rows = sorted(set(rows))
+        nonempty = [row for row in rows if row[2] > 0]
+        if not nonempty:
+            continue
+        first,last = nonempty[0],nonempty[-1]
+        protected.update((first[1],last[1]))
+        before = [row for row in rows if row[2] == 0 and row[0] < first[0]]
+        after = [row for row in rows if row[2] == 0 and row[0] > last[0]]
+        if before: protected.add(before[-1][1])
+        if after: protected.add(after[0][1])
+    return protected
+
+
 def refresh_snapshot_chronology(container, *, item_key='evidence', sort=False):
     """Recompute only from the supplied projection; never infer a diagnosis."""
     rows = container.get(item_key, [])
@@ -452,7 +493,7 @@ def compact_final_context(initial, *, max_bytes, measure, protected_evidence_ids
     refresh_snapshot_chronology(original,sort=True)
     if measure(original)<=max_bytes:return original
     working=_unpack_final_tables(original)
-    protected=set(protected_evidence_ids)
+    protected=set(protected_evidence_ids) | snapshot_boundary_refs(working.get('evidence',[]))
     protected.update(ref for signal in working.get('inspection_signals',[])
                      for ref in signal.get('evidence_ids',[]))
     # Preserve actual source families and their nonempty/latest snapshot anchors,
