@@ -1,0 +1,31 @@
+# 30 分钟持续演进执行计划
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Each scheduled round continues one existing scenario.
+
+**Goal:** 用定期复盘和可复查改进持续提升发现、解释与恢复展示，维护公开可用性。
+
+**Architecture:** 当前聊天每 30 分钟调度，读取仓库内规范/状态及仓库外 CHECKPOINT；沿用现有 Lab、Zabbix、自主后台和封存切换，不添加新的产品服务。
+
+**Tech Stack:** Codex automation、现有 Python/FastAPI/MySQL/Zabbix/React 验证与发布工具。
+
+**Spec:** [持续演进设计](../specs/2026-11-13-continuous-evolution-design.md)。
+
+## 全局约束与审查重点
+
+- 串行单问题；复现先验实际效果；任何故障都有独立清理护栏。
+- 不把结构通过、历史重放、控制清理或报告数量当作完整诊断通过。
+- 周期衔接不重置用时；模型结果未知不自动重发；架构改动必须对应实测缺口。
+- 演示异常优先恢复；A 只开放完整通过场景，B 只读权限保持。
+- 先失败回归再最小改动；运行相关新鲜检查，重大实现依规范审查；不推私有历史。
+
+## 交付
+
+- [x] 写清证据/架构准备、复现有效性、自主发现、优化重测及恢复发布门槛。
+- [x] 初始化进度状态，接续现有 SQL 失败与后续 L1 队列。
+- [x] 操作手册关联持续演进规范，说明周期与单场景时限。
+- [x] 使用 app automation 接口配置当前聊天每 30 分钟继续，读回频率与状态；不创建重复任务。
+- [x] 检查文档链接、实际调度配置和 CHECKPOINT，记录下一次行动。创建调度不计为完成首轮故障验收。
+
+## 每轮执行检查
+
+读取进度 → 检查现有任务及公网 → 当前场景六层审计 → 一个改进/准备/有界复现 → 相关检查与安全清理 → 记录结果/手册 → 达门槛才切换发布。详细步骤与各类失败处理以 spec 为准。
