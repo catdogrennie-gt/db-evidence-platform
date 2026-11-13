@@ -60,10 +60,15 @@ class ZabbixClient:
         self.calls += 1
         if self.calls > 48:
             raise PlatformError(503, 'monitoring_budget_exceeded', '监控查询超过时间或调用预算。')
+        # Version discovery is anonymous in Zabbix. Keep evidence requests
+        # authenticated without retaining either header set on a pooled client.
+        headers = {'Content-Type': 'application/json-rpc'}
+        if method != 'apiinfo.version':
+            headers['Authorization'] = 'Bearer ' + self._token
         try:
             scope = nullcontext(self._client) if self._client is not None else httpx.Client(timeout=8, follow_redirects=False, trust_env=False)
             with scope as client:
-                with client.stream('POST', self.url, timeout=min(8, self._remaining()), headers={'Authorization': 'Bearer ' + self._token, 'Content-Type': 'application/json-rpc'}, json={'jsonrpc': '2.0', 'id': self.calls, 'method': method, 'params': params}) as response:
+                with client.stream('POST', self.url, timeout=min(8, self._remaining()), headers=headers, json={'jsonrpc': '2.0', 'id': self.calls, 'method': method, 'params': params}) as response:
                     if response.status_code != 200: raise ValueError()
                     chunks, size = [], 0
                     for chunk in response.iter_bytes():
