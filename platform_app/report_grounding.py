@@ -12,7 +12,7 @@ from .db import utcnow
 from .evidence import digest
 from .request_delivery import (MAX_AUDIT_BYTES, prepare_request_delivery,
     confirm_request_delivery, request_sha256)
-from .zabbix_diagnostics import CONTRACT, definition
+from .zabbix_diagnostics import CONTRACT, LEGACY_LOCK_CONTRACT, definition, legacy_lock_definition
 
 UNKNOWN = ['continuous_duration', 'incident_count', 'release_mechanism', 'current_state']
 
@@ -47,7 +47,7 @@ def _qualified_source_point(row, member, manifest):
     expected_point = {'instance_id': row.instance_id, 'source': row.source,
         'source_mode': row.source_mode, 'observed_at': iso(row.observed_at)}
     metadata = payload.get('item') if isinstance(payload.get('item'), dict) else {}
-    spec = definition(metadata)
+    spec = definition(metadata) or legacy_lock_definition(metadata)
     if (point != expected_point or spec is None or spec['query'] != 'locks'
             or spec['source'] != row.source or identity.get('transport') != 'zabbix'
             or not isinstance(identity.get('source_id'), str)
@@ -58,7 +58,8 @@ def _qualified_source_point(row, member, manifest):
         return None, 'source_identity_or_capability_mismatch'
     rows = payload.get('rows')
     if (not isinstance(rows, list) or len(rows) > 50 or any(not isinstance(value, dict) for value in rows)
-            or producer.get('contract') != CONTRACT or producer.get('query_name') != 'locks'
+            or producer.get('contract') != spec.get('contract', CONTRACT)
+            or producer.get('query_name') != 'locks'
             or producer.get('scope') != 'current_snapshot'
             or type(producer.get('snapshot_complete')) is not bool
             or type(producer.get('snapshot_truncated')) is not bool
@@ -68,7 +69,9 @@ def _qualified_source_point(row, member, manifest):
             or type(producer.get('returned_row_count')) is not int
             or producer['returned_row_count'] != len(rows) + int(producer['snapshot_truncated'])
             or producer['snapshot_truncated'] and len(rows) != 50
-            or not rows and producer['snapshot_complete'] is not True):
+            or not rows and producer['snapshot_complete'] is not True
+            or spec.get('contract') == LEGACY_LOCK_CONTRACT and
+                (producer['snapshot_complete'] is not True or producer['snapshot_truncated'] is not False)):
         return None, 'snapshot_capability_not_proven'
     return {'fact_id': row.id, 'evidence_id': row.id, 'kind': 'lock_snapshot_point',
         'instance_id': row.instance_id, 'source': row.source, 'observed_at': iso(row.observed_at),

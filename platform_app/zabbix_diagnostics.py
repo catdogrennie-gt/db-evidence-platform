@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from .common import iso
 
 CONTRACT = 'db-evidence-mysql-diagnostics-v1'
+LEGACY_LOCK_CONTRACT = 'db-evidence-lock-snapshot-v2'
 APP_CONTRACT = 'db-evidence-application-events-v1'
 SPECS = {
     'configuration': ('mysql.configuration', 50, 'current_snapshot'),
@@ -55,6 +56,38 @@ def definition(item):
         return None
     source, limit, scope = SPECS[query]
     return {'query': query, 'source': source, 'limit': limit, 'scope': scope}
+
+
+def legacy_lock_definition(item):
+    """Only the registered complete-snapshot protocol, never name inference."""
+    if (item.get('key', item.get('key_', '')) not in
+            ('dbops.mysql.lock_snapshot', 'sl.mysql.lock_snapshot')
+            or item.get('enhancement') != 'mysql.lock_waits'):
+        return None
+    tags = item.get('tags')
+    if not isinstance(tags, list): return None
+    values = [t.get('value') for t in tags
+              if isinstance(t, dict) and t.get('tag') == 'sl.snapshot_contract']
+    if not values or any(v != LEGACY_LOCK_CONTRACT for v in values): return None
+    return {'query': 'locks', 'source': 'mysql.lock_waits', 'limit': 50,
+            'scope': 'current_snapshot', 'contract': LEGACY_LOCK_CONTRACT}
+
+
+def legacy_lock_producer(item, parsed):
+    """Authenticate future legacy producer proof before the payload is hashed."""
+    if legacy_lock_definition(item) is None or not isinstance(parsed, dict): return None
+    rows, count = parsed.get('rows'), parsed.get('total_row_count')
+    if (parsed.get('producer_contract') != LEGACY_LOCK_CONTRACT
+            or parsed.get('snapshot_complete') is not True
+            or parsed.get('snapshot_truncated') is not False
+            or type(count) is not int or not 0 <= count <= 50
+            or not isinstance(rows, list) or len(rows) != count
+            or any(not isinstance(row, dict) for row in rows)):
+        return None
+    return {'contract': LEGACY_LOCK_CONTRACT, 'query_name': 'locks',
+            'scope': 'current_snapshot', 'returned_row_count': count,
+            'snapshot_row_count': count, 'snapshot_complete': True,
+            'snapshot_truncated': False}
 
 
 def preprocessing(query):

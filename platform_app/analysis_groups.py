@@ -309,6 +309,14 @@ def _collect_group(db,instance,mapping,source,lease,config,client):
                 tags={t['tag']:t['value'] for t in item['tags']}
                 spec={'field_units':{k[14:]:v for k,v in tags.items() if k.startswith('sl.field_unit.')},'snapshot_scope':tags.get('sl.snapshot_scope')}
                 payload={'item':item,'rows':[r for r in parsed['rows'][:100] if isinstance(r,dict)],**spec,'cumulative_counters':parsed.get('cumulative_counters'),'counter_epoch':parsed.get('counter_epoch'),'scope':parsed.get('scope')}
+                if item['enhancement']=='mysql.lock_waits':
+                    from .zabbix_diagnostics import legacy_lock_producer
+                    producer=legacy_lock_producer(item,parsed)
+                    if producer is not None:
+                        payload['diagnostic_origin']={'version':'diagnostic-origin-v1',
+                            'producer':producer,'collection':provenance(source,mapping,instance,item),
+                            'observation':{'instance_id':instance.id,'source':'mysql.lock_waits',
+                                'source_mode':'live','observed_at':iso(stamp)}}
                 if item['enhancement']=='mysql.statement_digest': payload['window']=digest_window([(parse_time(r['time']),r['value']) for r in rows],spec)
                 snapshot_coverage={**coverage,**lock_snapshot_metadata(item,parsed)} if item['enhancement']=='mysql.lock_waits' else coverage
                 entries.append({'source':item['enhancement'],'observed_at':iso(stamp),'payload':payload,'sensitivity':'restricted','availability':'available' if fresh else 'stale','coverage':snapshot_coverage,'truncated':coverage['truncated']})

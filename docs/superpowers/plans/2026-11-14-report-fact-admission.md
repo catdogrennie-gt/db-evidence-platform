@@ -56,3 +56,11 @@ Authority: [reviewed design](../specs/2026-11-14-report-fact-admission-design.md
 ## Round46 limit and next action
 
 Deliver design plus a reproducible expected-failure contract this round, with no product runtime changes. Next implementation starts at registry/delivery/typed admission but may only release once the real reporting surfaces are coherent. If feasibility remains uncertain, retain WAIT with its exact reason rather than calling a new field semantic verification.
+## Round53 prospective compatibility repair
+
+1. Reproduce the missing origin through the actual group collector and the consumer's denial of otherwise valid delivered legacy points. Include empty/positive/max-size snapshots and normal controls; conflicting tags, invalid types/counts, unknown keys and truncated legacy must remain denied.
+2. Add a small exact legacy capability/producer validator in `zabbix_diagnostics`, invoke only for future legacy lock entries, bind collection/observation identity in `analysis_groups`, and explicitly recognize that protocol in `report_grounding`. Keep strict diagnostics and old evidence unchanged. Verify meaningful RED→GREEN plus related scope, snapshot, request and presentation regressions.
+3. Review exact changes and tests; run a fresh backend suite since collection/grounding are shared. Publish only the reviewed capsule. Prepare a sealed candidate based on23, preserving immutable23 and native handoff/rollback. Before deployment inspect real queue/policy/leases; no race against the07:08 natural inspection and no forced model calls. After deployment verify new original-object origin by indexed bounded reads, then actual legal-policy report separately. Diagnosis and A entry remain WAIT until full fault/normal/recovery acceptance.
+
+Scope FR-022–024/AT-013; same LOCK-03 cumulative clock, one forward-protocol deliverable this round. If bounded compatibility fails, record the exact missing condition rather than reopen experiments or repeatedly retry models.
+

@@ -119,3 +119,11 @@ flowchart LR
 `tests/platform/test_report_grounding_gap.py`的三个控制项确认：旧结构及引用校验接受失败措辞；伪引用仍拒绝；真实授权冻结详情包含非空/空两个时点，且持久化模型原文未改。两个待实现接收条件分别使用过度断言和否定措辞，要求没有送模回执时不得获得已验证事实/标题。
 
 `--runxfail`实际得到2失败、3通过，均失败在真实详情缺少report_grounding，而非导入、数据库或伪引用错误。默认严格XFAIL仅标识尚未实现，不能说这些断言已经受控；后续真正实现后必须移除标记，XPASS阻止悄悄把未完成项算作成功。此回归没有验证任意自由文案的语义，也不是把旧AI报告改成通过。
+## Prospective compatibility correction — 2026-11-14
+
+Round52 runtime evidence identified two actual producer paths: the strict diagnostic pack stores hashed origin, while the selected original `dbops.mysql.lock_snapshot` still uses `db-evidence-lock-snapshot-v2` and loses producer proof before hashing. This is a collection/consumer contract gap, not evidence that the old report is now correct.
+
+Within the existing authorized single-issue repair, support that exact legacy producer prospectively. Require a recognized lock item key and enhancement, nonconflicting contract tags, matching producer contract, strictly typed complete/nontruncated flags, dictionary rows and exact integer total count within50. Build origin from validated values, then bind the collector's actual collection/observation identity inside the future payload. The report consumer recognizes this distinct complete-snapshot protocol explicitly; it cannot borrow the newer protocol's truncated capability. Missing, conflicting, malformed or historical proof remains unverified. No history rewrite, mapping/identity change, new SQL execution, increased budget or AI permission.
+
+Alternatives rejected: reconstructing old proof from mutable coverage cannot authenticate historical source capability; replacing the selected item or object would unnecessarily change configuration/history. Preserve the existing source and immutable evidence, with a small forward-only adapter. Code tests, deployed collection and real model results remain separate acceptance stages.
+
