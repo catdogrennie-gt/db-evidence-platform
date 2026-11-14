@@ -30,7 +30,7 @@ def test_reasoning_prompt_revision_adds_no_numeric_request_bytes_or_scenario_ans
     from platform_app.investigations import PROMPT_VERSION, _system_prompt_for_sources
 
     prompt = _system_prompt_for_sources({'zabbix.item.numeric:measured'})
-    assert PROMPT_VERSION == 'evidence-investigation-v4.8'
+    assert PROMPT_VERSION == 'evidence-investigation-v4.9'
     # Measured v3.9 source-selected prompt size, not an increased hard budget.
     assert len(prompt.encode()) <= 8753
     assert all(key not in prompt for key in (

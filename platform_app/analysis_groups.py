@@ -280,6 +280,13 @@ def _collect_group(db,instance,mapping,source,lease,config,client):
                 coverage['reason_codes'].append('diagnostic_snapshot_invalid')
             else:
                 diagnostic['observed_at']=iso(stamp)
+                # Existing Evidence.payload_sha256 and manifest root pointers
+                # now bind prospective producer, collection and point identity.
+                # Mutable coverage stays operational metadata, not proof of it.
+                origin=diagnostic['payload']['diagnostic_origin']
+                origin['collection']=provenance(source,mapping,instance,item)
+                origin['observation']={'instance_id':instance.id,'source':diagnostic['source'],
+                    'source_mode':'live','observed_at':diagnostic['observed_at']}
                 diagnostic['availability']='available' if fresh else 'stale'
                 diagnostic['coverage']={**coverage,**diagnostic['coverage']}
                 if diagnostic['coverage'].get('capture_gaps'):

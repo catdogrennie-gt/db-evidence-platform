@@ -1,7 +1,7 @@
 """Pin an open reporting contract, without pretending to verify prose semantics.
 
-Strict XFAILs are intentional unimplemented acceptance cases (FACT-ADMISSION01).
-Run with --runxfail to reproduce RED. No provider or live service is used.
+The legacy unverified boundary is implemented; raw prose remains unverified.
+This does not prove typed selection, presentation or prose semantics. No live IO.
 """
 from copy import deepcopy
 
@@ -20,10 +20,6 @@ from tests.platform.test_snapshot_chronology import snap
 
 OVERCLAIM = '窗口内出现一次短暂记录锁等待，随后自行解除。'
 CAUTIOUS = '无法确认是否短暂、发生一次或自行解除，只能确认保留的采样状态。'
-
-
-class MissingGroundingContract(AssertionError):
-    """Only this exact missing feature is an expected failure."""
 
 
 def candidate(ref, statement=OVERCLAIM):
@@ -60,6 +56,10 @@ def persist_legacy(e, statement):
     report = validate_report(candidate(e['used'].id, statement), {e['used'].id},
                              expected_version=PROMPT_VERSION)
     e['investigation'].report = deepcopy(report)
+    # The shared capacity fixture starts as a rule report. This reproducer
+    # replaces it with a legacy model report, including its truthful metadata.
+    e['investigation'].conclusion_type = 'live_model'
+    e['investigation'].status = 'completed'
     e['db'].commit()
     detail = investigation_detail(e['reader'], e['investigation'], include_audit=False)
     e['db'].expire(e['investigation'], ['report'])
@@ -75,14 +75,11 @@ def test_persisted_frozen_detail_reproducer_has_real_authorized_observations(sna
     assert detail['report']['executive_summary']['conclusion']['status'] == 'observed'
 
 
-@pytest.mark.xfail(strict=True, raises=MissingGroundingContract,
-                   reason='FACT-ADMISSION01: delivery-bound report grounding is not implemented')
 @pytest.mark.parametrize('wording', [OVERCLAIM, CAUTIOUS])
 def test_legacy_prose_cannot_gain_verified_authority_without_a_delivery_receipt(snapshots, wording):
     detail = persist_legacy(snapshots, wording)
     # Both overclaim and its negation stay unverified: this is not a lexical detector.
-    if 'report_grounding' not in detail:
-        raise MissingGroundingContract('Missing server-owned, receipt-qualified grounding contract')
+    assert 'report_grounding' in detail
     grounding = detail['report_grounding']
     assert grounding['status'] == 'unverified'
     assert 'actual_delivery_receipt_missing' in grounding['reason_codes']

@@ -99,6 +99,14 @@ def normalize(item, parsed):
     payload = {'item': item, 'rows': rows, 'snapshot_scope': spec['scope'],
                'counter_epoch': None, 'cumulative_counters': spec['scope'] == 'server_cumulative_top_n',
                'window': {'valid': False, 'reason': 'current_snapshot_not_interval_delta'}}
+    # Preserve validated producer proof inside the payload hashed at ingestion.
+    # Collection/observation identity is bound by the fenced collector, never
+    # copied from the upstream envelope. Legacy rows are not backfilled.
+    payload['diagnostic_origin'] = {'version': 'diagnostic-origin-v1', 'producer': {
+        'contract': contract, 'query_name': spec['query'], 'returned_row_count': count,
+        'snapshot_row_count': len(rows), 'snapshot_complete': complete,
+        'snapshot_truncated': truncated, 'scope': spec['scope'],
+    }}
     if spec['query'] in ('table_io','file_io','statements'):
         payload['timer_unit'] = 'picoseconds'
     if spec['query'] in ('error_log','slow_log','application_logs'):

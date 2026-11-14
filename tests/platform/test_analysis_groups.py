@@ -353,6 +353,7 @@ def test_readonly_user_reads_sanitized_diagnostic_history_but_not_other_raw_text
     row=e['fake'].items[2]
     row.update(key_='mysql.custom.query[DbA,,,configuration]',tags=[{'tag':'dbe.contract','value':'mysql-diagnostics-v1'},{'tag':'dbe.query','value':'configuration'}])
     payload={'producer_contract':'db-evidence-mysql-diagnostics-v1','query_name':'configuration',
+             'diagnostic_origin':{'collection':{'source_id':'forged'},'observation':{'instance_id':'forged'}},
              'rows':[{'VARIABLE_NAME':'max_connections','VARIABLE_VALUE':40},{'VARIABLE_NAME':'password','VARIABLE_VALUE':'DO-NOT-SEND'}],
              'snapshot_complete':True,'snapshot_truncated':False,'returned_row_count':2}
     original=e['fake'].call
@@ -412,6 +413,27 @@ def test_fixed_zabbix_diagnostic_pack_is_selected_fenced_and_not_raw_model_text(
     else:
         assert typed is not None and typed.sensitivity=='restricted'
         assert typed.payload_sha256==digest(typed.payload)
+        origin=typed.payload.get('diagnostic_origin')
+        assert origin is not None, 'collection provenance must be inside the frozen payload hash'
+        assert origin['collection']=={'source_id':e['source'].id,'hostid':'102','itemid':'13',
+            'mapping_version':group['version'],'config_revision':group['config_revision'],'transport':'zabbix'}
+        from platform_app.common import iso
+        assert origin['observation']=={'instance_id':group['instance_id'],'source':'mysql.configuration',
+            'source_mode':'live','observed_at':iso(typed.observed_at)}
+        assert origin['producer']['snapshot_complete'] is True
+        assert origin['collection']['config_revision']==e['db'].get(m.CollectionRun,typed.run_id).config_revision
+        from platform_app.evidence import create_manifest
+        frozen=create_manifest(e['db'],'validation',typed.id,[typed.instance_id],
+            typed.observed_at-timedelta(seconds=1),typed.observed_at+timedelta(seconds=1))
+        member=e['db'].scalar(select(m.ManifestItem).where(m.ManifestItem.manifest_id==frozen.id,
+            m.ManifestItem.evidence_id==typed.id))
+        root=e['db'].scalar(select(m.ManifestItem).where(m.ManifestItem.manifest_id==frozen.id,m.ManifestItem.item_type=='coverage'))
+        assert member.payload_sha256==typed.payload_sha256
+        assert {'id':typed.id,'sha256':typed.payload_sha256} in root.payload['evidence']
+        assert frozen.manifest_sha256==digest(root.payload)
+        from copy import deepcopy
+        changed=deepcopy(typed.payload);changed['diagnostic_origin']['collection']['source_id']='other-source'
+        assert digest(changed)!=member.payload_sha256
         assert project_evidence(typed)['data']['variables']=={'max_connections':40}
         assert 'DO-NOT-SEND' not in json.dumps(project_evidence(typed))
     assert {p['itemids'][0] for method,p in e['fake'].calls if method=='history.get'} <= {'13'}

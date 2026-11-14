@@ -111,6 +111,8 @@ def test_current_fact_uses_new_refs_values_without_rewriting_finding_or_report(c
     assert '87.5%' in fact['summary'] and '35 / 40' in fact['summary']
     assert set(fact['evidence_ids'])=={a.id,b.id}
     assert result['report']['executive_summary']==original['executive_summary']
+    assert result['report']['report_presentation']['model_narrative_verification']=='unverified'
+    assert result['report']['report_presentation']['fact_assessment']=='not_evaluated'
     assert inv.report==original and e['finding'].calculation==before
 
 

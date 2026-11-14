@@ -647,7 +647,7 @@ def _finding_presentation(event,finding,instance,mapping,inv,review=None):
         summary=(f"近期中位数 {_readable_number((calc.get('recent') or {}).get('median'))}{suffix}，"
                  f"参考基线中位数 {_readable_number((calc.get('baseline') or {}).get('median'))}{suffix}；变化待分析。")
         if review and inv and review.get('investigation_id')==inv.id and review.get('signal_hash')==finding.signal_hash:
-            reviewed=True;title=review['statement'].strip()[:80];summary='AI 提请复核：'+review['statement']
+            reviewed=True;title=('待核验：'+review['statement'].strip())[:80];summary='AI 未核实解释（提请复核）：'+review['statement']
     elif finding and finding.category=='lock_wait':
         count=calc.get('row_count')
         if type(count) is int and count>0 and calc.get('observed_at'):
@@ -735,14 +735,17 @@ def issue_response(db,event,finding=None,actor=None):
     review=_finding_reviews(db,[(event,finding)],{event.id:inv} if inv else {}).get(event.id)
     presentation=_finding_presentation(event,finding,instance,mapping,inv,review)
     report_fact=_related_report_fact(db,inv,finding) if inv else None
-    summary=report_fact
+    from .report_presentation import report_presentation
+    report_view=report_presentation(inv) if inv else None
+    labelled_fact=report_view['interpretation_label']+'：'+report_fact if report_fact else None
+    summary=labelled_fact
     if inv and finding and finding.category=='evidence_correlation': summary=(finding.calculation or {}).get('statement') or summary
     freshness=_report_freshness(db,event,inv,finding)
     observation_state=presentation['observation_state']
     if presentation['summary'] is not None:summary=presentation['summary']
     if (finding and finding.category=='baseline_change' and not presentation['reviewed']
             and observation_state not in HISTORICAL_OBSERVATIONS and report_fact):
-        summary+=' 报告窗口内：'+report_fact
+        summary+=' 报告窗口内的'+labelled_fact
     summary=_presentation_summary(summary,presentation,finding,freshness)
     if not summary: summary='报告未提供与该问题直接对应的事实，待定向核验' if inv and report else '分析尚未完成' if inv else '异常已登记，等待证据分析'
     return {'id':event.id,'event_id':event.id,'title':presentation['title'],'presentation_kind':presentation['presentation_kind'],'kind':finding.kind if finding else 'current','status':event.status,'severity':event.severity,'summary':(('待核验假设：' if finding and finding.category=='evidence_correlation' else '') + summary),'issue_category':_issue_category(finding),'report_freshness':freshness,'object_names':[instance.name],'instance_ids':[instance.id],'first_seen_at':iso(event.created_at),'updated_at':iso(event.last_seen_at),'investigation_id':inv.id if inv else None,'analysis_mode':(task.payload or {}).get('mode','rules_only') if task else 'rules_only','coverage_status':'complete' if report.get('coverage',{}).get('complete') else 'unknown' if not inv else 'partial','observation_state':observation_state,'finding_status':'hypothesis' if presentation['reviewed'] or finding and finding.category=='evidence_correlation' else 'conditional_prediction' if finding and finding.kind=='risk' and finding.category!='capacity_pressure' else 'observed','report_status':inv.status if inv else 'not_started','report_error':task.error_code if task else None}
@@ -775,7 +778,7 @@ def _overview_reports(db, rows, allowed_data):
     reports={}
     if permitted:
         projection=select(m.Investigation.id,m.Investigation.status,m.Investigation.window_start,
-            m.Investigation.window_end,m.Investigation.task_id,
+            m.Investigation.window_end,m.Investigation.task_id,m.Investigation.conclusion_type,
             m.Investigation.report['executive_summary']['headline'].as_string().label('headline'),
             m.Investigation.report['coverage']['complete'].as_boolean().label('coverage_complete')
         ).where(m.Investigation.id.in_(permitted))
@@ -812,6 +815,8 @@ def _overview_observations(db, rows):
 
 
 def _overview_issue(event,finding,instance,mapping,inv,task,evidence,episodes,db,review=None):
+    from .report_presentation import report_presentation
+    report_view=report_presentation(inv) if inv else None
     observed=[evidence[identifier].observed_at for identifier in (finding.evidence_ids or [])
               if identifier in evidence and evidence[identifier].instance_id==event.instance_id] if finding else []
     if finding and finding.category=='evidence_correlation' and inv:
@@ -824,7 +829,7 @@ def _overview_issue(event,finding,instance,mapping,inv,task,evidence,episodes,db
     observation_state=presentation['observation_state'];summary=presentation['summary']
     # A whole-report headline does not review an unrelated numerical signal.
     if not summary and inv and inv.status in ('completed','partial') and inv.headline:
-        summary='关联报告概览：'+inv.headline
+        summary=report_view['interpretation_label']+'：'+inv.headline
     summary=_presentation_summary(summary,presentation,finding,freshness)
     if not summary:
         summary=('报告已形成；打开报告查看完整事实与证据。' if inv.status in ('completed','partial') else '分析尚未完成') if inv else '异常已登记，等待证据分析'
@@ -835,7 +840,8 @@ def _overview_issue(event,finding,instance,mapping,inv,task,evidence,episodes,db
         'investigation_id':inv.id if inv else None,'analysis_mode':task.mode or 'rules_only' if task else 'rules_only',
         'coverage_status':'complete' if inv and inv.coverage_complete is True else 'partial' if inv else 'unknown',
         'observation_state':observation_state,'finding_status':'hypothesis' if presentation['reviewed'] or finding and finding.category=='evidence_correlation' else 'conditional_prediction' if finding and finding.kind=='risk' and finding.category!='capacity_pressure' else 'observed',
-        'report_status':inv.status if inv else 'not_started','report_error':task.error_code if task else None}
+        'report_status':inv.status if inv else 'not_started','report_error':task.error_code if task else None,
+        'report_presentation':report_view}
 
 
 def overview(actor, **scope):
@@ -951,6 +957,10 @@ def issue_detail(actor, identifier):
     result['frozen_facts'] = frozen_facts(actor, inv) if inv else []
     from .report_observation_bounds import frozen_observation_bounds
     result['observation_bounds'] = frozen_observation_bounds(actor, inv) if inv else None
+    from .report_grounding import report_grounding
+    result['report_grounding'] = report_grounding(actor, inv) if inv else None
+    from .report_presentation import report_presentation
+    result['report_presentation'] = report_presentation(inv, grounding=result['report_grounding']) if inv else None
     return result
 
 

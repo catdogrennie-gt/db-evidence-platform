@@ -242,7 +242,7 @@ def test_lock_summary_uses_related_fact_and_declares_later_observation_uncovered
     inv.report={'facts':[{'statement':'Throughput normal','evidence_ids':['unrelated']},{'statement':'One historical lock edge observed','evidence_ids':[e['evidence'].id]}]}
     e['db'].commit()
     result=issue_response(e['db'],event,finding,e['actor'])
-    assert result['summary']=='One historical lock edge observed'
+    assert result['summary']=='原始报告（来源未核实）：One historical lock edge observed'
     assert result['issue_category']=='locks' and result['report_freshness']['status']=='current'
     event.last_seen_at=inv.window_end+timedelta(seconds=30);e['db'].commit()
     # Processing/tick time alone is not a later target observation.

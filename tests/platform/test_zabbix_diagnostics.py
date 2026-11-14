@@ -19,6 +19,26 @@ def snapshot(query='configuration',rows=None):
             'returned_row_count':len(rows)}
 
 
+@pytest.mark.parametrize('count,truncated',[(0,False),(1,False),(50,True)])
+def test_validated_producer_proof_is_preserved_in_hashed_payload(count,truncated):
+    from copy import deepcopy
+    from platform_app.evidence import digest
+    pack=snapshot('locks',[{'waiting_trx_id':1}]*count)
+    pack.update(snapshot_complete=not truncated,snapshot_truncated=truncated,
+                returned_row_count=count+int(truncated))
+    pack['diagnostic_origin']={'version':'forged','collection':{'source_id':'forged'}}
+    result=d.normalize(item('locks'),pack)
+    origin=result['payload'].get('diagnostic_origin')
+    assert origin is not None, 'producer proof is currently outside the payload hash'
+    assert origin['version']=='diagnostic-origin-v1'
+    assert origin['producer']=={'contract':'db-evidence-mysql-diagnostics-v1','query_name':'locks',
+        'returned_row_count':count+int(truncated),'snapshot_row_count':count,
+        'snapshot_complete':not truncated,'snapshot_truncated':truncated,'scope':'current_snapshot'}
+    assert 'collection' not in origin and 'observation' not in origin
+    changed=deepcopy(result['payload']);changed['diagnostic_origin']['producer']['snapshot_complete']=truncated
+    assert digest(changed)!=digest(result['payload'])
+
+
 @pytest.mark.parametrize('query,source',[
     ('configuration','mysql.configuration'),('transactions','mysql.transactions'),
     ('sessions','mysql.sessions'),('table_io','mysql.table_io'),('file_io','mysql.file_io'),

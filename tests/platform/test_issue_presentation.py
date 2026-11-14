@@ -87,7 +87,7 @@ def test_valid_finding_review_promotes_only_that_signal_without_mutating_history
     assert event.title==original_title
     [card]=overview(e['reader'])['issues'];detail=issue_detail(e['reader'],event.id)
     assert card['presentation_kind']==detail['presentation_kind']=='issue'
-    assert card['title']==detail['title']==statement and card['finding_status']=='hypothesis'
+    assert card['title']==detail['title']=='待核验：'+statement and card['finding_status']=='hypothesis'
     assert '复核' in card['summary'] and 'UNRELATED' not in card['summary']
     assert overview(e['reader'])['stats']['current']==1
 

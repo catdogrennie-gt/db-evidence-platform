@@ -237,6 +237,8 @@ def test_report_is_historical_until_current_episode_is_inside_its_frozen_window(
     [finding]=scan_signals(db,e['policy'],utcnow()); finding.latest_investigation_id=inv.id;db.commit()
     result=snapshot(db,e['config'])
     assert result['report']['executive_summary']['headline']=='Historical genuine diagnosis'
+    assert result['report']['report_presentation']['model_narrative_verification']=='unverified'
+    assert result['report']['report_presentation']['fact_assessment']=='not_evaluated'
     assert not result['report_matches_current_observation']
     inv.window_end=utcnow()+timedelta(seconds=1);db.commit()
     assert snapshot(db,e['config'])['report_matches_current_observation']

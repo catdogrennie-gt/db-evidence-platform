@@ -1,5 +1,6 @@
 import type { Row } from './api';
 import type { ObservationBoundsData } from './ObservationBounds';
+import type { ReportGroundingData } from './ReportGrounding';
 
 export interface Capability {
   name: string;
@@ -100,6 +101,7 @@ export interface FrozenRuleFact {
   };
 }
 export interface IssueDetail extends Issue {
+  report_grounding?: ReportGroundingData | null;
   observation_bounds?: ObservationBoundsData | null;
   frozen_facts?: FrozenRuleFact[];
   report_status?: string;

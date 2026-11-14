@@ -1,4 +1,5 @@
 import { ExecutiveSummary } from './ExecutiveSummary';
+import { ReportGrounding } from './ReportGrounding';
 import { FrozenRuleFacts } from './FrozenRuleFacts';
 import { CoverageNotice } from './CoverageNotice';
 export { ExecutiveSummary } from './ExecutiveSummary';
@@ -1008,6 +1009,7 @@ export function ReportEvidence({ data, onMetricReference }: { data: IssueDetail;
   const charts = prioritizeIssueCharts((data.charts ?? []).filter(chart => chartData(chart.points ?? []).some(([, value]) => value !== null)), data.issue_category, data.event_subject?.id ?? data.instance_ids?.[0]);
   return <>
     <FrozenRuleFacts facts={data.frozen_facts} window={data.window} onMetricReference={onMetricReference} />
+    <ReportGrounding data={data.report_grounding} onMetricReference={onMetricReference} />
     {data.finding_status === 'observed' && data.summary && data.presentation_kind !== 'signal' && <Alert
       className="intel-gap-banner" showIcon
       type={isHistoricalObservation(data) ? 'info' : 'warning'}
@@ -1026,11 +1028,19 @@ export function RecentAnalyses({ reports }: { reports: Row[] }) {
   return <details className="intel-details"><summary>巡检记录（最近分析）</summary><section className="intel-section"><div className="intel-section-head"><h2>最近分析</h2><span>包含正常巡检；巡检完成不等于发现问题</span></div>
     {reports.length ? <div className="intel-recent-reports">{reports.slice(0, 3).map(report => {
       const summary = (report.report as Row | undefined)?.executive_summary as ExecutiveSummaryData | undefined;
-      const complete = ['completed', 'succeeded'].includes(String(report.status));
+      const complete = ['completed', 'partial', 'succeeded'].includes(String(report.status));
       const pending = ['queued', 'running', 'preparing', 'analyzing', 'pending', 'collecting_evidence'].includes(String(report.status));
-      const title = !complete ? pending ? '分析尚未完成' : '分析未成功完成' : report.mode === 'rules_only' ? '规则巡检结果' : summary?.headline ?? '旧版未生成完整结论摘要';
+      const presentation = report.report_presentation as Row | undefined;
+      const supported = presentation?.version === 'report-presentation-v1';
+      const rules = supported ? presentation.origin === 'rules' : report.mode === 'rules_only';
+      const pointTitle = supported && presentation.origin === 'model' && presentation.primary_basis === 'historical_source_points'
+        && presentation.fact_assessment === 'point_facts_only' && typeof presentation.primary_headline === 'string' ? presentation.primary_headline : null;
+      const title = !complete ? pending ? '分析尚未完成' : '分析未成功完成' : rules ? '规则巡检结果' : pointTitle ?? '历史分析记录';
       return <Card key={String(report.id)} size="small"><Space wrap><Status value={report.status} /><Status value={report.mode} /><Time value={report.created_at} /></Space><ContextLink to={`/investigations/${report.id}`}><h3>{title}</h3></ContextLink>
-        {complete && report.mode !== 'rules_only' && summary && <p>{summary.conclusion.statement}</p>}
+        {complete && !rules && <section aria-label="AI 未核实解释"><strong>AI 未核实解释</strong>
+          {summary ? <><h4>{summary.headline}</h4><p>{summary.conclusion?.statement}</p></> : <p>旧版未生成完整结论摘要</p>}
+          <small>核实时点请查看冻结报告；模型解释不代表已证实的原因或恢复。</small>
+        </section>}
         <ContextLink to={`/investigations/${report.id}`}>查看冻结报告 →</ContextLink></Card>;
     })}</div> : <div className="intel-empty-inline">当前范围与时间内尚无分析报告。</div>}
   </section></details>;

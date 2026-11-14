@@ -223,7 +223,7 @@ def test_metric_issue_summary_uses_only_its_own_cited_fact(showcase_env, kind):
     finding.latest_investigation_id = inv.id
     e['db'].commit()
     result = issue_response(e['db'], e['db'].get(m.Event, finding.event_id), finding)
-    assert '报告窗口内：Selected metric explanation' in result['summary']
+    assert '报告窗口内的原始报告（来源未核实）：Selected metric explanation' in result['summary']
     assert 'Other metric explanation' not in result['summary']
     assert '近期中位数 40 s' in result['summary'] and '参考基线中位数 10 s' in result['summary']
     assert not result['summary'].startswith('报告窗口内：')

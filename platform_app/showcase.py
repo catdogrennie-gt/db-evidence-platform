@@ -14,6 +14,7 @@ from .access import actor_for_user, authorize, current_permissions
 from .common import PlatformError, iso, parse_time
 from .db import utcnow
 from .scheduling import db_now
+from .report_presentation import report_presentation
 
 FAST_COLLECTION = 10
 FAST_SIGNAL = 5
@@ -291,7 +292,7 @@ def snapshot(db,config):
         finding=db.scalar(select(m.InspectionFinding).where(m.InspectionFinding.instance_id==instance.id,m.InspectionFinding.category=='lock_wait'))
         first=(finding.calculation or {}).get('episode_started_at') if finding else None
         matches=bool(valid and current['count'] and first and inv.window_start<=parse_time(first)<inv.window_end and finding.latest_investigation_id==inv.id)
-        report=dict(id=inv.id,status=inv.status,mode=(task.payload or {}).get('mode','rules_only') if task else 'rules_only',created_at=iso(inv.created_at),error_code=task.error_code if task else None,executive_summary=(inv.report or {}).get('executive_summary'),coverage=(inv.report or {}).get('coverage',{}),current_for_episode=matches,**{'from':iso(inv.window_start),'to':iso(inv.window_end)})
+        report=dict(id=inv.id,status=inv.status,mode=(task.payload or {}).get('mode','rules_only') if task else 'rules_only',created_at=iso(inv.created_at),error_code=task.error_code if task else None,executive_summary=(inv.report or {}).get('executive_summary'),report_presentation=report_presentation(inv),coverage=(inv.report or {}).get('coverage',{}),current_for_episode=matches,**{'from':iso(inv.window_start),'to':iso(inv.window_end)})
         items=list(db.scalars(select(m.ManifestItem).where(m.ManifestItem.manifest_id==inv.manifest_id,m.ManifestItem.instance_id==instance.id,m.ManifestItem.item_type.in_(['time_series_window','prometheus_window'])).limit(100))) if inv.manifest_id else []
         def rank(item):
             payload=item.payload or {};meta=payload.get('item') or {};key=str(meta.get('key') or payload.get('template') or '').lower()
@@ -456,7 +457,7 @@ def numeric_snapshot(db,config):
         matches=bool(matching_ids)
         report={'id':inv.id,'status':inv.status,'mode':(task.payload or {}).get('mode','rules_only') if task else 'rules_only',
                 'created_at':iso(inv.created_at),'error_code':task.error_code if task else None,
-                'executive_summary':(inv.report or {}).get('executive_summary'),'coverage':(inv.report or {}).get('coverage',{}),
+                'executive_summary':(inv.report or {}).get('executive_summary'),'report_presentation':report_presentation(inv),'coverage':(inv.report or {}).get('coverage',{}),
                 'current_for_episode':matches,'matched_signals':[signal for signal in signals if signal['id'] in matching_ids],
                 'from':iso(inv.window_start),'to':iso(inv.window_end)}
         # Fetch only identity metadata for ranking. Frozen windows can contain

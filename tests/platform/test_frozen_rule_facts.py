@@ -207,6 +207,8 @@ def test_issue_detail_uses_selected_report_frozen_facts(frozen_capacity):
     before = deepcopy(inv.report)
     detail = issue_detail(e['reader'], finding.event_id)
     assert detail['investigation_id'] == inv.id
+    assert detail['report_grounding']['status'] == 'unverified'
+    assert detail['report_grounding']['admitted_facts'] == []
     assert detail['frozen_facts'] == facts(e)
     assert len(detail['frozen_facts']) == 1
     assert detail['report'] == before == inv.report
