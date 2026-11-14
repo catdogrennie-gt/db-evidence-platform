@@ -10,6 +10,8 @@ Authority: [reviewed design](../specs/2026-11-14-report-fact-admission-design.md
 
 ## 2. Build the backend admission boundary
 
+- First resolve the measured packing constraint: the preserved42-snapshot request is47549 bytes including reserve; the selected duplicate-layout simplified registry sample grows it to60643 against48000. The2-snapshot normal sample grows47118→47780 but excludes full metadata, so it is not a complete feasibility pass. These values apply only to that serialization layout, are not a theoretical minimum, and do not prove that other compact encodings exceed the limit. Probe compact references/shared schemas reusing existing projections; keep full provenance server-side and recheck exact required fields in the final request. Never append a registry after budget checks, increase limits or silently lose counterevidence.
+
 - Factor a bounded source-qualified registry from actual delivered, authorized frozen projections, not all manifest entries or raw chronology alone. Bind payload/manifest identity, item/config identity, projection scope and delivery round.
 - Recheck after packing; persist a server-generated receipt bound to the exact request producing that output before treating any fact as delivered. Unknown IO result stays unknown. Only necessary fact fields actually retained in that request qualify; earlier-call receipts cannot fill facts omitted from the final request. Tools and final-round compaction use the same receipt path. No budget increase.
 - Add typed selection/facet validation; first adapter is point observations from qualified MySQL lock snapshots. No continuous-duration/count/release/current-state proof capability initially.
