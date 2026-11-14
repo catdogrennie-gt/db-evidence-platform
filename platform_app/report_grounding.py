@@ -98,6 +98,69 @@ def _identity(fact):
         ('source_id', 'hostid', 'itemid', 'mapping_version', 'config_revision')))
 
 
+def _transaction_pairs(rows):
+    """Opaque operational IDs only; never conflate connection/thread namespaces."""
+    from .tools import _identity_value
+    if not isinstance(rows, list) or len(rows) > 50:
+        return None
+    pairs = []
+    for row in rows:
+        if not isinstance(row, dict):
+            return None
+        blocker, waiter = (_identity_value(row.get(key)) for key in ('blocking_trx_id', 'waiting_trx_id'))
+        if blocker is None or waiter is None or int(blocker) <= 0 or int(waiter) <= 0 or blocker == waiter:
+            return None
+        pairs.append((str(blocker), str(waiter)))
+    return tuple(sorted(pairs))
+
+
+def _delivered_lock_relations(row, observation, payload):
+    """Called only after exact receipt/source admission. No cross-point joins.
+
+    A whole-row projection match is necessary even for this small field subset;
+    missing rows/roles and disagreeing repeat projections cannot provide edges.
+    """
+    expected = _transaction_pairs((row.payload or {}).get('rows'))
+    if not expected:
+        return ()
+    try:
+        location = observation['location']
+        mi, ii = location['message_index'], location['item_index']
+        if type(mi) is not int or type(ii) is not int or mi < 0 or ii < 0:
+            return ()
+        content = json.loads(payload['messages'][mi]['content'])
+        entries = content.get('evidence') if mi == 1 else content.get('items')
+        item = entries[ii]
+        if (item.get('evidence_id') != observation['evidence_id']
+                or request_sha256(item) != observation['projection_sha256']):
+            return ()
+        data = item['data']
+        supplied = data.get('rows')
+        if (not isinstance(supplied, list) or type(data.get('row_count')) is not int
+                or data['row_count'] != len(supplied) or _transaction_pairs(supplied) != expected):
+            return ()
+        return tuple(sorted(set(expected)))
+    except (KeyError, TypeError, IndexError, AttributeError, ValueError):
+        return ()
+
+
+def _anonymous_lock_relations(pairs):
+    """Fresh labels per point, no reversible identifier encoding or mapping."""
+    aliases = {}
+
+    def alias(identifier):
+        if identifier not in aliases:
+            ordinal, label = len(aliases) + 1, ''
+            while ordinal:
+                ordinal, digit = divmod(ordinal - 1, 26)
+                label = chr(65 + digit) + label
+            aliases[identifier] = label
+        return aliases[identifier]
+
+    return [{'blocking_alias': alias(blocker), 'waiting_alias': alias(waiter)}
+        for blocker, waiter in pairs]
+
+
 def report_grounding(actor, investigation):
     """Recheck current scope and the exact final request on every read.
 
@@ -222,17 +285,30 @@ def report_grounding(actor, investigation):
         key = (*_identity(fact), fact['observed_at'])
         groups.setdefault(key, []).append(fact)
     conflicts = {fact['fact_id'] for group in groups.values() if len({(f['row_count'],f['count_scope']) for f in group}) > 1 for fact in group}
+    relation_conflicts = {fact['fact_id'] for group in groups.values()
+        if len({_transaction_pairs((rows[f['fact_id']].payload or {}).get('rows')) for f in group}) > 1
+        for fact in group}
     if conflicts & refs:
         result['reason_codes'].append('conflicting_same_time_points')
+    if relation_conflicts & refs:
+        result['reason_codes'].append('conflicting_same_time_lock_relations')
     facts = {}
+    relations = {}
     for observation in receipt['observations']:
         identifier = observation['evidence_id']
         fact = source_facts.get(identifier)
+        edges = ()
         if fact and _delivered(fact, observation):
-            facts[identifier] = fact
+            facts[identifier] = dict(fact)
+            if identifier not in relation_conflicts:
+                edges = _delivered_lock_relations(rows[identifier], observation, payload)
         else:
             result['reason_codes'].append(source_reasons.get(identifier,
                 'required_point_fields_not_delivered' if fact else 'frozen_member_missing_or_mismatched'))
+        if identifier not in relations:
+            relations[identifier] = edges
+        elif relations[identifier] != edges:
+            relations[identifier] = ()
     result['admitted_facts'] = sorted((fact for key, fact in facts.items() if key not in conflicts),
         key=lambda fact: (fact['observed_at'], fact['fact_id']))
     result['reason_codes'] = sorted(set(result['reason_codes']))
@@ -245,6 +321,13 @@ def report_grounding(actor, investigation):
                 else '历史采样时点未见 MySQL 锁等待（不代表全窗口健康）')
     elif not result['reason_codes']:
         result['reason_codes'].append('no_qualified_lock_points_delivered')
+    # Actual delivery does not grant present-day raw-field access. This view
+    # never returns transaction IDs or their map, even for privileged readers.
+    # Only known sensitivity permits anonymous structure; raw evidence keeps
+    # its separate access path. Labels cannot join identities across points.
+    eligible = {f['fact_id'] for f in result['admitted_facts'] if relations.get(f['fact_id'])}
+    current_sensitivity = dict(db.execute(select(m.Evidence.id, m.Evidence.sensitivity)
+        .where(m.Evidence.id.in_(eligible))).all()) if eligible else {}
     # Audit IO and frozen-member checks can outlive an authorization change.
     # Recheck before returning even metadata/counts, not just at entry.
     current = get_investigation(actor, inv.id)
@@ -256,6 +339,17 @@ def report_grounding(actor, investigation):
             or current_resources != resources
             or request_sha256(current_candidate) != binding['normalized_report_sha256']):
         return _result('report_changed_during_validation')
+    # The added field-policy read must not become a new unchecked I/O tail.
+    from .access import authorize
+    authorize(actor, 'data.read', resources)
+    for fact in result['admitted_facts']:
+        # Inspect the already-loaded state without an implicit ORM refresh.
+        # Expired/changed sensitivity fails closed rather than adding I/O after
+        # the final report-binding and authorization checks.
+        if (current_sensitivity.get(fact['fact_id']) in ('redacted', 'restricted')
+                and rows[fact['fact_id']].__dict__.get('sensitivity') in ('redacted', 'restricted')):
+            fact['lock_relation_identity'] = 'point_local_aliases'
+            fact['lock_relations'] = _anonymous_lock_relations(relations[fact['fact_id']])
     from .fact_selection import evaluate_selections
     result['model_selections'] = evaluate_selections(inv.report or {}, result['admitted_facts'])
     return result

@@ -50,3 +50,36 @@ test('unsupported versions cannot grant authority, and mixed identities have no 
   assert.doesNotMatch(mixed, /<h2>/);
   assert.match(mixed, /至少 2 条/);
 });
+
+test('a qualified sampled relation shows blocker to waiter before collapsed observations, without altering model text', () => {
+  const data = { ...grounding, admitted_facts: [{ ...grounding.admitted_facts[0], lock_relation_identity: 'point_local_aliases', lock_relations: [{ blocking_alias: 'A', waiting_alias: 'B' }] }] };
+  const html = render(ReportGrounding, { data });
+  assert.match(html, /采样时点的阻塞关系/);
+  assert.match(html, /阻塞方/);
+  assert.match(html, /等待方/);
+  assert.ok(html.indexOf('事务别名 A') < html.indexOf('事务别名 B'));
+  assert.ok(html.indexOf('事务别名 A') < html.indexOf('查看时点、来源与证据'));
+  assert.match(html, /不表示持续时长、根因或当前状态/);
+  assert.match(html, new RegExp(`/evidence/${id}`));
+  assert.match(html, /AI 解释尚未核实/);
+});
+
+test('absent, invalid and unqualified relations never create a graph', () => {
+  for (const extra of [undefined, [], [{ blocking_alias: '<secret>', waiting_alias: 'A' }]]) {
+    const data = { ...grounding, admitted_facts: [{ ...grounding.admitted_facts[0], lock_relation_identity: 'point_local_aliases', lock_relations: extra }] };
+    assert.doesNotMatch(render(ReportGrounding, { data }), /采样时点的阻塞关系|&lt;secret&gt;/);
+  }
+  const data = { ...grounding, status: 'unverified', admitted_facts: [{ ...grounding.admitted_facts[0], lock_relations: [{ blocking_alias: 'A', waiting_alias: 'B' }] }] };
+  assert.doesNotMatch(render(ReportGrounding, { data }), /采样时点的阻塞关系|事务别名 A/);
+});
+
+test('relation diagrams stay within each sampled point and limit visible samples and edges', () => {
+  const facts = Array.from({ length: 4 }, (_, index) => ({ ...grounding.admitted_facts[0], fact_id: `${id}-${index}`, observed_at: `2026-11-13T06:53:4${index}Z`, lock_relation_identity: 'point_local_aliases', lock_relations: Array.from({ length: 7 }, (_, edge) => ({ blocking_alias: `${String.fromCharCode(65 + index)}${String.fromCharCode(65 + edge)}`, waiting_alias: `Z${String.fromCharCode(65 + edge)}` })) }));
+  const html = render(ReportGrounding, { data: { ...grounding, admitted_facts: facts } });
+  assert.doesNotMatch(html, /事务别名 AA|事务别名 BF/);
+  assert.match(html, /事务别名 BA/);
+  assert.match(html, /事务别名 DE/);
+  assert.match(html, /另有 2 条/);
+  assert.match(html, /最近 3 个/);
+  assert.equal((html.match(/class="lock-relation-edge"/g) || []).length, 15);
+});
