@@ -407,7 +407,7 @@ def compact_tool_item(item):
         result['summary']=item['summary']
         result['points_omitted']=item.get('points_omitted',0)
     elif 'data' in item:
-        data=item['data']; result['data']={k:v for k,v in data.items() if k in ('row_count','event_count','observation_unavailable','text_omitted','timer_unit','snapshot_scope','window','values')}
+        data=item['data']; result['data']={k:v for k,v in data.items() if k in ('row_count','event_count','observation_unavailable','text_omitted','timer_unit','snapshot_scope','window','values','session_observation')}
         numeric_subset=(str(item.get('source','')).startswith('zabbix.item.numeric:')
                         and data.get('projection_scope')=='retained_samples_subset_not_upstream_gap')
         if numeric_subset:

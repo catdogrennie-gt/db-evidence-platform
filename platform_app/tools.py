@@ -258,6 +258,23 @@ def _structure_fields(item, alias):
     return result
 
 
+def _session_fields(item):
+    """Finite observations only; state may otherwise contain arbitrary text."""
+    result = {}
+    enums = {
+        'PROCESSLIST_COMMAND': {'Daemon', 'Sleep', 'Query', 'Execute', 'Connect',
+                                'Quit', 'Binlog Dump', 'Binlog Dump GTID'},
+        'PROCESSLIST_STATE': {'', 'Waiting on empty queue', 'Suspending',
+                              'executing', 'Sending data', 'User sleep',
+                              'Waiting for table metadata lock'},
+    }
+    for name, values in enums.items():
+        value = _structure_value(item, (name,))
+        if value in values:
+            result[name] = value
+    return result
+
+
 def _verified_requested_lock_attributes(row, payload):
     """The verified v2 producer joins attributes on REQUESTING_ENGINE_LOCK_ID.
 
@@ -306,6 +323,16 @@ def project_evidence(row: Evidence, *, window_start=None, window_end=None) -> di
         data["rows"] = [_numeric_fields(r, LOCK_FIELDS) | _structure_fields(r, alias) for r in raw_rows]
         from .zabbix_diagnostics import definition,CONTRACT
         declared=definition(payload.get('item') or {})
+        if row.source == 'mysql.sessions':
+            for raw, projected in zip(raw_rows, data['rows']):
+                projected.update(_session_fields(raw))
+            if (declared is not None and declared['query'] == 'sessions'
+                    and (row.coverage or {}).get('snapshot_contract') == CONTRACT):
+                data['session_observation'] = {
+                    'producer': 'performance_schema.threads',
+                    'timer': 'reported PROCESSLIST_TIME seconds; not proof of SQL runtime, connection, transaction or lock age',
+                    'limits': 'Sleep may hold a transaction; Daemon duration alone does not establish an incident',
+                }
         verified_roles=(declared is not None and declared['query']=='locks'
             and (row.coverage or {}).get('snapshot_contract')==CONTRACT)
         for raw,projected in zip(raw_rows,data['rows']) if verified_roles else []:

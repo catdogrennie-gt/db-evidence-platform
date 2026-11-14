@@ -442,6 +442,7 @@ def preview_investigation(actor, instance_ids, start, end, question, mode="rules
             "numeric_lock_edges",
             "digest_hash_and_keyword_shape",
             "numeric_metadata",
+            "allowlisted_session_command_and_state",
             "numeric_configuration_allowlist",
             "log_counts_and_error_codes",
         ],
