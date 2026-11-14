@@ -316,6 +316,10 @@ def project_evidence(row: Evidence, *, window_start=None, window_end=None) -> di
         if row.source.startswith('zabbix.item.numeric:') and item.get('value_kind')=='numeric':
             data['rows']=[{'time':iso(parse_time(r['time'])),'value':number(r.get('value'))} for r in raw_rows if r.get('time') and number(r.get('value')) is not None]
         else:
+            # These are retained Zabbix history entries, not rows inside a
+            # diagnostic snapshot whose raw contents are unavailable here.
+            data['history_sample_count'] = data.pop('row_count')
+            data['history_count_scope'] = 'projected_history_entries_not_diagnostic_rows'
             data['text_omitted']=True
             data['value_kind']=item.get('value_kind') if item.get('value_kind') in ('text','log','unsupported') else 'unknown'
             data['reason']='raw_text_not_authorized_for_external_model'
