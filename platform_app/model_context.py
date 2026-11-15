@@ -4,6 +4,7 @@ from copy import deepcopy
 from datetime import datetime
 import hashlib
 import json
+import math
 from .common import iso, parse_time, PlatformError
 from .zabbix_items import safe_item,safe_relations
 
@@ -26,6 +27,17 @@ def _sampled_numeric_rows(series):
             if len(row)>index and type(row[index]) is int and row[index]>0]
 
 
+def _raw_latest_sample(rows):
+    unavailable={'value':None,'observed_at':None}
+    if not rows:return unavailable
+    point=rows[-1];value=point.get('value');stamp=point.get('time')
+    if type(value) not in (int,float) or isinstance(value,float) and not math.isfinite(value):return unavailable
+    try:parse_time(stamp)
+    except (PlatformError,AttributeError,ValueError,TypeError):return unavailable
+    if point.get('validity','valid')!='valid':return unavailable
+    return {'value':value,'observed_at':stamp}
+
+
 def compact_numeric_evidence(item, series=None, *, window_start=_WINDOW_UNSET, window_end=_WINDOW_UNSET):
     """Bound an already-authorized projection, never its frozen source payload.
 
@@ -38,8 +50,11 @@ def compact_numeric_evidence(item, series=None, *, window_start=_WINDOW_UNSET, w
     if (not str(item.get('source','')).startswith('zabbix.item.numeric:')
             or not isinstance(data.get('rows'),list) or data.get('observation_unavailable')
             or data.get('text_omitted')): return item
-    if data.get('projection_scope')=='retained_samples_subset_not_upstream_gap': return item
+    if data.get('projection_scope')=='retained_samples_subset_not_upstream_gap':
+        if 'latest_sample' not in data:data['latest_sample']=_raw_latest_sample(data['rows'])
+        return item
     rows=data['rows']
+    unplaced_sample=False
     bounded=window_start is not _WINDOW_UNSET or window_end is not _WINDOW_UNSET
     if bounded:
         # ORM boundaries are UTC-naive datetimes; external strings must carry
@@ -54,7 +69,9 @@ def compact_numeric_evidence(item, series=None, *, window_start=_WINDOW_UNSET, w
             retained=[]
             for point in rows:
                 try:stamp=parse_time(point.get('time'))
-                except (PlatformError,AttributeError,ValueError,TypeError):continue
+                except (PlatformError,AttributeError,ValueError,TypeError):
+                    unplaced_sample=True
+                    continue
                 if lower<=stamp<upper:retained.append(point)
             rows=retained
         data['row_count']=len(rows)
@@ -80,6 +97,7 @@ def compact_numeric_evidence(item, series=None, *, window_start=_WINDOW_UNSET, w
         if key in meta:data['item'][key]=str(meta[key])[:limit]
     data.update(sample_count=count,first_time=rows[0].get('time') if rows else None,
         last_time=rows[-1].get('time') if rows else None,
+        latest_sample=_raw_latest_sample([] if unplaced_sample else rows),
         rows=rows[:1]+rows[-3:] if count>4 else rows,
         rows_omitted=max(0,count-4),projection_scope='retained_samples_subset_not_upstream_gap')
     return item
@@ -267,6 +285,7 @@ def trim_numeric_summary(bundle):
         series[key]=[dictionary[old] for old in used]
         for row in rows:row[position]=replacements[row[position]]
     series['omitted_count']=series.get('omitted_count',0)+1
+    _compact_latest_sample_times(series)
     return True
 
 
@@ -308,7 +327,7 @@ def _encode_numeric_context(initial):
         flattened=[]
         for item in numeric:
             values=flatten({key:value for key,value in item.items() if key!='evidence_id'})
-            for key in ('observed_at','data.first_time','data.last_time'):
+            for key in ('observed_at','data.first_time','data.last_time','data.latest_sample.observed_at'):
                 if isinstance(values.get(key),str):values[key+'_ref']=time_ref(values.pop(key))
             points=values.get('data.rows',[])
             values['data.rows']=[]
@@ -384,6 +403,7 @@ def compact_initial(bundle):
         if isinstance(signal.get('calculation'),dict):
             for key in ('reference_key','source_id','mapping_version','config_revision','calculation'):
                 signal['calculation'].pop(key,None)
+    _pair_latest_numeric_samples(initial)
     _encode_numeric_context(initial)
     return initial
 
@@ -480,6 +500,51 @@ def _unpack_final_tables(initial):
     return result
 
 
+def _compact_latest_sample_times(series):
+    if 'latest_sample' not in series.get('columns',[]):return
+    position=series['columns'].index('latest_sample')
+    dictionary=series['latest_sample_time_dictionary']
+    used=sorted({row[position][1] for row in series.get('rows',[])})
+    replacements={old:new for new,old in enumerate(used)}
+    series['latest_sample_time_dictionary']=[dictionary[old] for old in used]
+    for row in series.get('rows',[]):row[position][1]=replacements[row[position][1]]
+
+
+def _pair_latest_numeric_samples(container):
+    """Pair existing value/time cells without duplicating measured dimensions."""
+    series=container.get('numeric_series')
+    if not isinstance(series,dict) or not series.get('rows'):return
+    columns=series.get('columns',[])
+    if 'latest_sample' in columns:return
+    if 'last' not in columns:return
+    time_column=next((key for key in ('last_time','last_time_ref') if key in columns),None)
+    if time_column is None:return
+    value_index=columns.index('last');time_index=columns.index(time_column)
+    times=[]
+    for row in series['rows']:
+        stamp=row[time_index]
+        if time_column.endswith('_ref'):
+            dictionary=series.get('last_time_dictionary',[])
+            stamp=dictionary[stamp] if type(stamp) is int and 0<=stamp<len(dictionary) else None
+        value=row[value_index]
+        try:
+            observed=parse_time(stamp)
+            if 'from' in container or 'to' in container:
+                if not parse_time(container.get('from'))<=observed<parse_time(container.get('to')):
+                    raise ValueError()
+        except (PlatformError,AttributeError,ValueError,TypeError):stamp=None
+        count=row[columns.index('sample_count')] if 'sample_count' in columns else None
+        if (stamp is None or type(count) is not int or count<=0 or type(value) not in (int,float)
+                or isinstance(value,float) and not math.isfinite(value)):value=None
+        if stamp not in times:times.append(stamp)
+        row[value_index]=[value,times.index(stamp)]
+        del row[time_index]
+    columns[value_index]='latest_sample'
+    del columns[time_index]
+    series.pop('last_time_dictionary',None)
+    series['latest_sample_columns']=['value','observed_at_ref']
+    series['latest_sample_time_dictionary']=times
+    series['summary_scope']='frozen_retained_samples_only'
 def compact_final_context(initial, *, max_bytes, measure, protected_evidence_ids=()):
     """Pack frozen evidence against the caller's complete final-request budget.
 
@@ -489,6 +554,7 @@ def compact_final_context(initial, *, max_bytes, measure, protected_evidence_ids
     The callback must be pure and include the complete assistant/tool group.
     """
     original=deepcopy(initial)
+    _pair_latest_numeric_samples(original)
     original.setdefault('coverage',{})['retained_evidence_count']=len(original.get('evidence',[]))
     refresh_snapshot_chronology(original,sort=True)
     if measure(original)<=max_bytes:return original
@@ -525,10 +591,13 @@ def compact_final_context(initial, *, max_bytes, measure, protected_evidence_ids
             replacements={old:new for new,old in enumerate(used)}
             series[key]=[dictionary[old] for old in used]
             for row in series.get('rows',[]):row[position]=replacements[row[position]]
+        _compact_latest_sample_times(series)
         if isinstance(series.get('rows'),list) and not series['rows']:
             # Empty tables have no row that can use their decoding schema.
             # Keep resource identity, relationships and omission/scope metadata.
             series.pop('columns',None)
+            for key in ('latest_sample_columns',):
+                series.pop(key,None)
             for key in list(series):
                 if key.endswith('_dictionary') and series[key]==[]:
                     series.pop(key)
@@ -546,6 +615,10 @@ def compact_final_context(initial, *, max_bytes, measure, protected_evidence_ids
                 retained=rows[-1:] if limit==1 else [rows[0],rows[-1]]
                 data['rows_omitted']=data.get('rows_omitted',0)+len(rows)-len(retained)
                 data['rows']=retained
+            if limit==1:
+                # The single remaining row already pairs the latest value and
+                # time. Drop its duplicate label before any measured dimension.
+                data.pop('latest_sample',None)
             meta=data.get('item') or {}
             for name in ('interval','interval_verified','history_semantics'):meta.pop(name,None)
     def omit_series_columns(names):

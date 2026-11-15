@@ -98,6 +98,9 @@ def test_forced_final_request_keeps_all_measured_triggers_and_normal_cross_host_
     result = run_investigation(env['factory'], lease, config, model_client=provider)
     assert len(calls) == 2, result.report
     assert set(refs).issubset(context_refs(json.loads(calls[0]['messages'][1]['content'])))
+    first_series=json.loads(calls[0]['messages'][1]['content'])['numeric_series']
+    assert 'latest_sample' in first_series['columns'], 'First model request bypassed latest-sample pairing'
+    assert first_series['latest_sample_columns']==['value','observed_at_ref']
     final = calls[-1]
     context = json.loads(final['messages'][1]['content'])
     assert set(refs).issubset(context_refs(context)), 'Budget compaction lost an actual changed dimension'

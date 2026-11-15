@@ -28,8 +28,11 @@ def test_compact_numeric_metadata_is_lossless_and_does_not_mutate_frozen_project
     assert len(json.dumps(series)) < len(json.dumps(before['numeric_series'])) - 2500
     for original, encoded in zip(rows, series['rows']):
         values = dict(zip(series['columns'], encoded))
-        assert len(encoded)==len(series['columns'])==len(original)
-        for field in ('reason_codes', 'sampling_method', 'semantics_source','first_time','last_time'):
+        assert len(encoded)==len(series['columns'])==len(original)-1
+        latest_value,latest_time_ref=values.pop('latest_sample')
+        values['last']=latest_value
+        values['last_time']=series['latest_sample_time_dictionary'][latest_time_ref]
+        for field in ('reason_codes', 'sampling_method', 'semantics_source','first_time'):
             index = values.pop(field+'_ref')
             assert type(index) is int and index >= 0
             values[field] = series[field+'_dictionary'][index]

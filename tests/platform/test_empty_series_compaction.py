@@ -104,10 +104,13 @@ def test_nonempty_protected_table_keeps_its_decodable_values_and_source_identity
     packed = result['numeric_series']
     assert len(packed['rows']) == 1
     fields = dict(zip(packed['columns'], packed['rows'][0]))
-    for name in ('evidence_id', 'hostid', 'itemid', 'sample_count', 'last', 'value_semantics'):
+    for name in ('evidence_id', 'hostid', 'itemid', 'sample_count', 'value_semantics'):
         assert fields[name] == values[name]
     assert packed['resources'][fields['resource']] == series['resources'][0]
-    assert packed['last_time_dictionary'][fields['last_time_ref']] == '2026-11-13T01:00:00Z'
+    latest_value, latest_time_ref = fields['latest_sample']
+    assert latest_value == values['last']
+    assert packed['latest_sample_columns'] == ['value', 'observed_at_ref']
+    assert packed['latest_sample_time_dictionary'][latest_time_ref] == '2026-11-13T01:00:00Z'
     for name, value in fields.items():
         if name.endswith('_ref'):
             assert type(value) is int and 0 <= value < len(packed[name[:-4] + '_dictionary'])
