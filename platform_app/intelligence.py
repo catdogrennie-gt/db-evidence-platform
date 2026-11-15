@@ -694,7 +694,9 @@ def _finding_presentation(event,finding,instance,mapping,inv,review=None):
     historical=state in HISTORICAL_OBSERVATIONS or event.status in TERMINAL_EVENTS
     kind='history' if historical else 'signal' if finding and finding.category=='baseline_change' and not reviewed else 'issue'
     if state=='configuration_changed':summary='当前监控选择或配置已变化；此处保留历史观测，需要依据新配置的后续样本重新判断。'
-    elif state=='returned_to_baseline':summary='后续实际样本已回到该指标原基线；这不代表业务整体健康或根因已解决。'
+    elif state=='returned_to_baseline':
+        if finding and finding.category=='baseline_change':title=(name+'已回到观测参考区间')[:80]
+        summary='后续实际样本已回到该指标原基线；这不代表业务整体健康或根因已解决。'
     elif state=='recovered':summary='后续实际观测已恢复；此处保留原问题与报告，不代表整体健康或根因已解决。'
     return {'title':title,'summary':summary,'presentation_kind':kind,'observation_state':state,
             'reviewed':reviewed}

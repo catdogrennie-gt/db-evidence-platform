@@ -119,6 +119,25 @@ def test_historical_observation_states_are_history_even_with_review(showcase_env
     assert issue_detail(e['reader'],event.id)['presentation_kind']=='history'
 
 
+@pytest.mark.parametrize('direction', ['increase', 'decrease'])
+@pytest.mark.parametrize('has_review', [False, True])
+def test_return_to_reference_title_describes_recovery_not_noise_direction(showcase_env,direction,has_review):
+    e=showcase_env;finding,event,now=baseline(e)
+    if has_review:
+        inv,dispatch,_=reviewed_report(e,finding,now)
+        sync_model_findings(e['db'],dispatch,inv)
+    finding.calculation={**finding.calculation,'observation_state':'returned_to_baseline',
+                         'direction':direction,'recent':{'median':9.999999}}
+    original_title=event.title;original_calculation=deepcopy(finding.calculation)
+    e['db'].commit()
+    [card]=overview(e['reader'])['issues'];detail=issue_detail(e['reader'],event.id)
+    assert card['title']==detail['title']=='Request duration已回到观测参考区间'
+    assert card['presentation_kind']==detail['presentation_kind']=='history'
+    assert '不代表业务整体健康' in card['summary']
+    assert event.title==original_title and finding.calculation==original_calculation
+    assert overview(e['reader'])['stats']['current']==0
+
+
 def test_old_report_completion_cannot_review_the_new_episode(showcase_env):
     e=showcase_env;finding,event,now=baseline(e);inv,dispatch,_=reviewed_report(e,finding,now)
     finding.signal_hash='new-episode';e['db'].commit()
