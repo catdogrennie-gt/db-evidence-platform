@@ -458,10 +458,23 @@ def dispatch_due(factory, *, policy_id=None, force=False):
     with factory.begin() as db:
         now = db_now(db)
         sync_reports(db)
-        query = select(m.InspectionPolicy).where(m.InspectionPolicy.enabled.is_(True))
+        query = select(m.InspectionPolicy.id).where(m.InspectionPolicy.enabled.is_(True))
         if policy_id: query = query.where(m.InspectionPolicy.id==policy_id)
         else: query = query.where(or_(m.InspectionPolicy.next_signal_at<=now,m.InspectionPolicy.next_ai_at<=now))
-        for policy in db.scalars(query.order_by(m.InspectionPolicy.next_signal_at).limit(100).with_for_update(skip_locked=True)):
+        # Preserve SKIP LOCKED before LIMIT, then release all candidate locks.
+        # A slow object's transaction must not retain unrelated policy locks.
+        identifiers = list(db.scalars(query.order_by(m.InspectionPolicy.next_signal_at).limit(100).with_for_update(skip_locked=True)))
+    for identifier in identifiers:
+        policy_created = []
+        with factory.begin() as db:
+            now = db_now(db)
+            query = select(m.InspectionPolicy).where(
+                m.InspectionPolicy.id==identifier, m.InspectionPolicy.enabled.is_(True))
+            if not policy_id:
+                query = query.where(or_(m.InspectionPolicy.next_signal_at<=now,m.InspectionPolicy.next_ai_at<=now))
+            policy = db.scalar(query.with_for_update(skip_locked=True))
+            if policy is None:
+                continue
             periodic = force or policy.next_ai_at <= now
             signal = force or policy.next_signal_at <= now
             policy.next_signal_at = now + timedelta(seconds=policy.signal_interval_seconds)
@@ -523,9 +536,11 @@ def dispatch_due(factory, *, policy_id=None, force=False):
                         db.flush()
                 except HTTPException as exc:
                     policy.status,policy.reason='queue_full',exc.detail.get('code','dispatch_failed') if isinstance(exc.detail,dict) else 'dispatch_failed'; break
-                created.append(task.id); used+=1
+                policy_created.append(task.id); used+=1
                 if trigger!='urgent':regular_used+=1
                 policy.last_dispatched_at,policy.status,policy.reason=now,'queued',None
+        # Never expose task IDs until this policy transaction has committed.
+        created.extend(policy_created)
     return created
 
 
