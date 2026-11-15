@@ -30,7 +30,7 @@ def test_reasoning_prompt_revision_adds_no_numeric_request_bytes_or_scenario_ans
     from platform_app.investigations import PROMPT_VERSION, _system_prompt_for_sources
 
     prompt = _system_prompt_for_sources({'zabbix.item.numeric:measured'})
-    assert PROMPT_VERSION == 'evidence-investigation-v4.9'
+    assert PROMPT_VERSION == 'evidence-investigation-v4.10'
     # Measured v3.9 source-selected prompt size, not an increased hard budget.
     assert len(prompt.encode()) <= 8753
     assert all(key not in prompt for key in (
@@ -50,7 +50,7 @@ def test_report_headline_names_the_supported_problem_instead_of_the_analysis_tas
     prompt = _system_prompt_for_sources({'zabbix.item.numeric:measured'})
     assert '直接写具体问题或风险' in prompt
     assert '不用“分析”“待关联”作标题' in prompt
-    assert '未发现问题则写正常巡检结论' in prompt
+    assert '全窗未见有据问题才写未见明确问题' in prompt
 
 
 def test_direct_impacts_can_be_observed_without_claiming_a_confirmed_cause():
