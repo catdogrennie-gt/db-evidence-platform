@@ -712,10 +712,32 @@ def _rules_report(bundle):
     }
 
 
+_MODEL_TRANSPORT_KINDS = (
+    (httpx.ConnectTimeout, "connect_timeout"),
+    (httpx.ReadTimeout, "read_timeout"),
+    (httpx.WriteTimeout, "write_timeout"),
+    (httpx.PoolTimeout, "pool_timeout"),
+    (httpx.TimeoutException, "timeout"),
+    (httpx.ConnectError, "connect_error"),
+    (httpx.ReadError, "read_error"),
+    (httpx.WriteError, "write_error"),
+    (httpx.CloseError, "close_error"),
+    (httpx.RemoteProtocolError, "remote_protocol_error"),
+    (httpx.LocalProtocolError, "local_protocol_error"),
+    (httpx.ProxyError, "proxy_error"),
+    (httpx.UnsupportedProtocol, "unsupported_protocol"),
+    (httpx.TransportError, "transport_error"),
+)
+
+
 class ModelTransportError(RuntimeError):
-    def __init__(self, code, unknown=False):
+    def __init__(self, code, unknown=False, *, transport_kind=None):
         self.code = code
         self.unknown = unknown
+        self.transport_kind = (
+            transport_kind if isinstance(transport_kind, str)
+            and transport_kind in {kind for _, kind in _MODEL_TRANSPORT_KINDS} else None
+        )
         super().__init__(code)
 
 
@@ -750,8 +772,9 @@ def call_model(config, payload, timeout):
         if len(response.content) > 256000:
             raise ModelTransportError("model_response_too_large", unknown=True)
         return response.json()
-    except (httpx.TimeoutException, httpx.TransportError):
-        raise ModelTransportError("model_call_outcome_unknown", unknown=True) from None
+    except (httpx.TimeoutException, httpx.TransportError) as exc:
+        kind = next((name for cls, name in _MODEL_TRANSPORT_KINDS if isinstance(exc, cls)), "transport_error")
+        raise ModelTransportError("model_call_outcome_unknown", unknown=True, transport_kind=kind) from None
     except (ValueError, KeyError):
         raise ModelTransportError("invalid_provider_response", unknown=True) from None
 
@@ -1310,6 +1333,8 @@ def _run_live(
             call.finished_at = utcnow()
             call.response = {**call.response, "error_code": exc.code,
                 "request_delivery": {**delivery_receipt, "status": call.status}}
+            if exc.transport_kind is not None:
+                call.response = {**call.response, "transport_kind": exc.transport_kind}
             db.commit()
             raise
         except Exception:
