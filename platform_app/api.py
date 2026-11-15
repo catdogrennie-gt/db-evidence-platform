@@ -215,7 +215,9 @@ def create_app(config=None, session_factory=None):
             with session_factory() as db:
                 db.execute(text("SELECT 1"))
                 version = db.execute(text("SELECT version_num FROM alembic_version")).scalar()
-            if version != "0007_demo":
+            # 0008 adds only a backwards-compatible secondary index. Accept
+            # both revisions during the expand/application rolling rollout.
+            if version not in {"0007_demo", "0008_evidence_live_window"}:
                 return JSONResponse(
                     status_code=503,
                     content={

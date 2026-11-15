@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import os
+from io import StringIO
 
 from alembic import command
 from alembic.config import Config
@@ -19,6 +20,46 @@ def alembic_config():
     return config
 
 
+def test_mysql_offline_index_migration_preserves_online_options():
+    config = alembic_config()
+    config.output_buffer = StringIO()
+    command.upgrade(config, "0007_demo:head", sql=True)
+    sql = config.output_buffer.getvalue()
+    assert "ADD INDEX ix_evidence_instance_mode_time" in sql
+    assert "ALGORITHM=INPLACE, LOCK=NONE" in sql
+    assert "SET SESSION lock_wait_timeout=5" in sql
+
+
+@pytest.mark.parametrize("drift", [None, "prefix", "descending", "invisible"])
+def test_existing_mysql_window_index_is_adopted_only_when_usable(monkeypatch, drift):
+    import importlib.util
+    from types import SimpleNamespace
+
+    spec = importlib.util.spec_from_file_location("window_migration", ROOT / "migrations/versions/0008_evidence_live_window.py")
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    columns = ["instance_id", "source_mode", "observed_at", "id"]
+    rows = [dict(Seq_in_index=i+1, Column_name=name, Sub_part=None,
+                 Collation="A", Visible="YES", Index_type="BTREE", Non_unique=1)
+            for i, name in enumerate(columns)]
+    if drift == "prefix": rows[0]["Sub_part"] = 10
+    if drift == "descending": rows[0]["Collation"] = "D"
+    if drift == "invisible": rows[0]["Visible"] = "NO"
+    result = SimpleNamespace(mappings=lambda: SimpleNamespace(all=lambda: rows))
+    connection = SimpleNamespace(exec_driver_sql=lambda *args: result)
+    context = SimpleNamespace(as_sql=False, dialect=SimpleNamespace(name="mysql"))
+    monkeypatch.setattr(migration.op, "get_context", lambda: context)
+    monkeypatch.setattr(migration.op, "get_bind", lambda: connection)
+    monkeypatch.setattr(migration, "inspect", lambda _: SimpleNamespace(get_indexes=lambda _: [
+        dict(name=migration.NAME, column_names=columns, unique=False)]))
+    monkeypatch.setattr(migration.op, "execute", lambda _: pytest.fail("adoption must not execute DDL"))
+    if drift:
+        with pytest.raises(RuntimeError, match="definition mismatch"):
+            migration.upgrade()
+    else:
+        migration.upgrade()
+
+
 def test_migration_creates_schema_with_asset_identity_uniqueness(tmp_path):
     from platform_app.db import create_db_engine, create_session_factory
     from platform_app.models import Department, System, Instance
@@ -29,6 +70,7 @@ def test_migration_creates_schema_with_asset_identity_uniqueness(tmp_path):
         config.attributes["connection"] = connection
         command.upgrade(config, "head")
     for table, columns in [
+        ("evidence", ["instance_id", "source_mode", "observed_at", "id"]),
         ("metric_frames", ["observed_at", "run_id"]),
         ("digest_snapshots", ["observed_at", "id"]),
         ("evidence_manifests", ["retain_until", "id"]),

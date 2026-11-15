@@ -328,6 +328,7 @@ class Evidence(IDMixin, Base):
     expires_at: Mapped[datetime | None] = mapped_column(UTC)
     __table_args__ = (
         Index("ix_evidence_instance_source_time", "instance_id", "source", "observed_at", "id"),
+        Index("ix_evidence_instance_mode_time", "instance_id", "source_mode", "observed_at", "id"),
         Index("ix_evidence_run", "run_id", "id"),
         Index("ix_evidence_expiry", "expires_at", "id"),
     )
