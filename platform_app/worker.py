@@ -157,6 +157,7 @@ class MaintenanceRunner:
             jobs
             if jobs is not None
             else {
+                "cadence": (1, self._cadence),
                 "clock": (15, self._clock),
                 "retention": (60, self._retention),
                 "exports": (60, self._exports),
@@ -168,6 +169,13 @@ class MaintenanceRunner:
         self.due = {name: 0.0 for name in self.jobs}
         self.states = {}
         self.state_lock = threading.Lock()
+
+    def _cadence(self):
+        from .showcase import reconcile_pacing
+
+        with self.factory.begin() as db:
+            reconcile_pacing(db, self.config)
+        return {}
 
     def _clock(self):
         with self.factory.begin() as db:
@@ -529,12 +537,6 @@ def serve(config, *, once=False, no_bridge=False):
         with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="collector") as pool:
             while not stopped.is_set():
                 try:
-                    from .showcase import reconcile_pacing
-                    try:
-                        with factory.begin() as db:
-                            reconcile_pacing(db, config)
-                    except Exception as exc:
-                        LOG.error("Cadence cleanup failure %s", type(exc).__name__)
                     schedule_due(factory)
                     inspection.tick(wait=once)
                     maintenance.tick()

@@ -118,3 +118,80 @@ def test_serve_background_writers_do_not_deadlock(mysql_background_engine, monke
     assert not server_errors
     assert not errors, f"real MySQL background transaction failure: {errors}"
     assert state["status"] == "available"
+
+
+@pytest.mark.parametrize("blocked", [True, False], ids=["cadence-lock-wait", "normal-cadence"])
+def test_cadence_lock_wait_does_not_block_ready_collection(mysql_background_engine, monkeypatch, blocked):
+    """Actual serve/maintenance wiring, synthetic SQL lock, no transport or fault."""
+    from platform_app import intelligence
+
+    engine = mysql_background_engine
+    factory = create_session_factory(engine)
+    entered, collected = threading.Event(), threading.Event()
+    handlers, errors, claimed = {}, [], []
+    real_maintenance = worker.MaintenanceRunner
+    job = "regression_cadence_" + uuid4().hex[:12]
+
+    def maintenance(factory, config):
+        runner = real_maintenance(factory, config)
+        # Exercise the registered production callback, isolating this test's
+        # persisted due boundary from other invocations and unrelated jobs.
+        runner.jobs = {job: runner.jobs["cadence"]} if "cadence" in runner.jobs else {}
+        runner.due = {name: 0 for name in runner.jobs}
+        return runner
+
+    holder = engine.connect()
+    transaction = holder.begin()
+    if blocked:
+        holder.exec_driver_sql("SELECT id FROM regression_lock_targets WHERE id=1 FOR UPDATE")
+
+    def cleanup(db, config):
+        db.connection().exec_driver_sql("SET SESSION innodb_lock_wait_timeout=3")
+        entered.set()
+        db.connection().exec_driver_sql("SELECT id FROM regression_lock_targets WHERE id=1 FOR UPDATE")
+
+    def claim(*args):
+        if claimed or not entered.wait(.5):
+            return None
+        claimed.append(True)
+        return SimpleNamespace(id="ready-synthetic-collection")
+
+    def execute(*args):
+        collected.set()
+        handlers[worker.signal.SIGINT]()
+
+    monkeypatch.setattr(worker, "create_db_engine", lambda config: engine)
+    monkeypatch.setattr(worker, "create_session_factory", lambda *args: factory)
+    monkeypatch.setattr(worker, "MaintenanceRunner", maintenance)
+    monkeypatch.setattr(worker, "ensure_default_rules", lambda db: None)
+    monkeypatch.setattr(worker, "heartbeat", lambda *args: None)
+    monkeypatch.setattr(worker, "renew", lambda *args: None)
+    monkeypatch.setattr(worker, "schedule_due", lambda factory: [])
+    monkeypatch.setattr(worker, "reconcile_interrupted", lambda factory: None)
+    monkeypatch.setattr(worker, "claim", claim)
+    monkeypatch.setattr(worker, "execute", execute)
+    monkeypatch.setattr(worker, "clock_tick", lambda *args, **kwargs: None)
+    monkeypatch.setattr(intelligence, "dispatch_due", lambda factory: [])
+    monkeypatch.setattr(showcase, "reconcile_pacing", cleanup)
+    monkeypatch.setattr(worker.signal, "signal", lambda sig, handler: handlers.setdefault(sig, handler))
+
+    def serve():
+        try:
+            worker.serve(SimpleNamespace(collection_workers=1, demo={}), no_bridge=True)
+        except BaseException as error:
+            errors.append(type(error).__name__)
+
+    thread = threading.Thread(target=serve)
+    thread.start()
+    try:
+        assert entered.wait(3), "cadence cleanup did not start"
+        ready_ran_during_wait = collected.wait(.7)
+    finally:
+        transaction.rollback()
+        holder.close()
+        if worker.signal.SIGINT in handlers:
+            handlers[worker.signal.SIGINT]()
+        thread.join(5)
+    assert not thread.is_alive()
+    assert not errors
+    assert ready_ran_during_wait, "ready collection was held behind cadence SQL lock"

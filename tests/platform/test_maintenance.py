@@ -11,6 +11,25 @@ from platform_app.db import create_session_factory, utcnow
 from platform_app.common import iso
 
 
+def test_default_cadence_cleanup_uses_maintenance_transaction_and_status(db, monkeypatch):
+    from platform_app import worker, showcase
+
+    factory = create_session_factory(db.get_bind())
+    config = SimpleNamespace()
+    calls = []
+    monkeypatch.setattr(showcase, "reconcile_pacing", lambda session, supplied: calls.append((session, supplied)))
+    runner = worker.MaintenanceRunner(factory, config)
+    try:
+        assert runner.jobs["cadence"][0] == 1
+        runner.run_job("cadence")
+        assert len(calls) == 1 and calls[0][1] is config
+        db.expire_all()
+        value = db.get(m.PlatformSetting, "maintenance:cadence").value
+        assert value["status"] == "available" and value["last_error_type"] is None
+    finally:
+        runner.close()
+
+
 def test_failed_maintenance_persists_safe_error_and_backoff_then_recovers(db):
     from platform_app.worker import MaintenanceRunner
 
