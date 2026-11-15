@@ -1,0 +1,53 @@
+{
+  "case_id": "POOL-01-normal-partial-window-health-overclaim",
+  "purpose": "Retained real offline semantic counterexample. Not an online report, injected answer or model improvement proof.",
+  "investigation_id": "cb902c7d-daa6-4c56-9d4f-c35d41a4f0c1",
+  "actual_request_sha256": "b9ff10a0d177c88708e84873e9e04572647af047890d2e4d275cb819e5376a2b",
+  "frozen_window_utc": {
+    "from": "2026-11-15 09:38:35.178724",
+    "to": "2026-11-15 10:38:35.178724"
+  },
+  "delivered_snapshot": {
+    "source": "mysql.lock_waits",
+    "observed_at": "2026-11-15T10:37:21.028683Z",
+    "row_count": 0,
+    "source_history_coverage_complete": false,
+    "source_history_truncated": true
+  },
+  "delivered_numeric_summary": {
+    "essential_item_count": 10,
+    "per_essential_item_retained_samples": "531-533",
+    "essential_item_coverage_complete": false,
+    "independent_upstream_samples_per_item": 720,
+    "min_max_latest_all_match": true,
+    "request_p95_ms_range": [
+      1.1569570051506162,
+      1.8345839926041665
+    ],
+    "pool_wait_p95_ms_range": [
+      0.01006200909614563,
+      0.03985100192949176
+    ],
+    "error_ratio_range": [
+      0,
+      0
+    ]
+  },
+  "unaltered_model_excerpts": {
+    "fact": "MySQL无锁等待、无活动事务、无慢查询、无错误日志事件；会话仅2个Daemon与2个Sleep，线程运行数2–4。",
+    "conclusion": "冻结窗口内应用、数据库与主机均处于低负载健康状态，未见明确问题。",
+    "countervailing_unknown": "锁等待、事务、慢查询等来源均为单次快照且history_truncated，无法确认全窗口持续无异常。"
+  },
+  "observed_result": {
+    "new_findings": 0,
+    "numeric_normal_no_new_finding": "LIMITED_PASS",
+    "raw_explanation_scope": "FAIL",
+    "full_normal_counterexample": "WAIT"
+  },
+  "offline_expectation": "A partial empty snapshot supports only its observed point. Normal retained metrics do not establish full-window database health. The raw model conclusion must remain unverified.",
+  "existing_authority_guard": {
+    "primary_headline": "历史采样时点未见 MySQL 锁等待（不代表全窗口健康）",
+    "model_narrative_verification": "unverified"
+  },
+  "next_gate": "Review evidence-scoped structured claims before choosing a generic change. Do not add duplicate headline guards or repeatedly modify prompts."
+}
