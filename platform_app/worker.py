@@ -23,6 +23,7 @@ from .db import create_db_engine, create_session_factory, utcnow
 from .evidence import purge_expired
 from .events import clock_tick, ensure_default_rules
 from .metrics_bridge import start_bridge
+from .inspection_dispatch import InspectionDispatcher
 from .secrets import SecretUnavailable
 from .models import (
     CollectionRun,
@@ -128,7 +129,7 @@ def schedule_due(factory):
     return created
 
 
-def heartbeat(factory, worker_id, active_count, maintenance=None):
+def heartbeat(factory, worker_id, active_count, maintenance=None, inspection=None):
     with factory.begin() as db:
         row = db.get(WorkerHeartbeat, (worker_id, "collection"))
         if row is None:
@@ -138,6 +139,8 @@ def heartbeat(factory, worker_id, active_count, maintenance=None):
         row.details = {"pid": os.getpid(), "active_tasks": active_count}
         if maintenance is not None:
             row.details["maintenance"] = maintenance.summary()
+        if inspection is not None:
+            row.details["inspection_dispatch"] = inspection.summary()
 
 
 class MaintenanceRunner:
@@ -494,6 +497,9 @@ def serve(config, *, once=False, no_bridge=False):
     if not no_bridge:
         bridge = start_bridge(factory, config)
     maintenance = MaintenanceRunner(factory, config)
+    # Both inspect multiple objects in one transaction. One background writer
+    # avoids cross-order instance locks, while collection remains independent.
+    inspection = InspectionDispatcher(factory, executor=maintenance.executor)
     demo_controller = None
     if (getattr(config, "demo", None) or {}).get("instance_id"):
         from .demo import DemoController
@@ -505,7 +511,7 @@ def serve(config, *, once=False, no_bridge=False):
             with lease_lock:
                 leases = list(active_leases.values())
             try:
-                heartbeat(factory, worker_id, len(leases), maintenance)
+                heartbeat(factory, worker_id, len(leases), maintenance, inspection)
                 for lease in leases:
                     try:
                         renew(factory, lease)
@@ -530,8 +536,7 @@ def serve(config, *, once=False, no_bridge=False):
                     except Exception as exc:
                         LOG.error("Cadence cleanup failure %s", type(exc).__name__)
                     schedule_due(factory)
-                    from .intelligence import dispatch_due
-                    dispatch_due(factory)
+                    inspection.tick(wait=once)
                     maintenance.tick()
                     reconcile_interrupted(factory)
                     for future in list(futures):
@@ -569,6 +574,7 @@ def serve(config, *, once=False, no_bridge=False):
         thread.join(timeout=2)
         if demo_controller is not None:
             demo_controller.close()
+        inspection.close()
         maintenance.close()
         if bridge is not None:
             bridge.shutdown()
