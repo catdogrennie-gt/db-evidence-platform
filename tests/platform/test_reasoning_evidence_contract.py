@@ -30,7 +30,7 @@ def test_reasoning_prompt_revision_adds_no_numeric_request_bytes_or_scenario_ans
     from platform_app.investigations import PROMPT_VERSION, _system_prompt_for_sources
 
     prompt = _system_prompt_for_sources({'zabbix.item.numeric:measured'})
-    assert PROMPT_VERSION == 'evidence-investigation-v4.10'
+    assert PROMPT_VERSION == 'evidence-investigation-v4.11'
     # Measured v3.9 source-selected prompt size, not an increased hard budget.
     assert len(prompt.encode()) <= 8753
     assert all(key not in prompt for key in (
@@ -57,9 +57,10 @@ def test_direct_impacts_can_be_observed_without_claiming_a_confirmed_cause():
     from platform_app.investigations import _system_prompt_for_sources
 
     prompt = _system_prompt_for_sources({'zabbix.item.numeric:measured'})
-    assert '有直接证据可明确已观察到的业务影响/故障现象' in prompt
-    assert '相关性或单项变化不足以确证故障' in prompt
-    assert '候选机制不得冒充已证实的具体根因' in prompt
+    assert '区分局部失败与业务影响' in prompt
+    assert '业务正常不抵消局部失败，缺根因不否认现象' in prompt
+    assert '单项负载变化不自动确证故障，相关性不证明因果' in prompt
+    assert '假设不冒充根因' in prompt
     assert '不给置信百分比' in prompt
     assert '禁止声称已证明根因、确认故障' not in prompt
 
