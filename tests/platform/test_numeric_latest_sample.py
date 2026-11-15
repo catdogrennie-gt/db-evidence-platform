@@ -34,10 +34,10 @@ def samples(packed):
     series = packed['numeric_series']
     if not series.get('rows'):return {}
     assert series['summary_scope'] == 'frozen_retained_samples_only'
-    assert series['latest_sample_columns'] == ['value', 'observed_at_ref']
     columns=series['columns'];result={}
     for row in series['rows']:
-        value,stamp_ref=row[columns.index('latest_sample')]
+        point=row[columns.index('latest_sample')]
+        value,stamp_ref=(point['value'],point['observed_at_ref']) if isinstance(point,dict) else point
         stamp=series['latest_sample_time_dictionary'][stamp_ref]
         if value is not None and stamp is not None and row[columns.index('sample_count')]>0:
             result[row[0]]={'value':value,'observed_at':stamp}
@@ -74,7 +74,7 @@ def test_budget_pruning_never_leaves_latest_samples_for_omitted_series():
     assert len(result['numeric_series']['rows']) < 3
     assert set(samples(result)) == {row[0] for row in result['numeric_series']['rows']}
     series=result['numeric_series'];position=series['columns'].index('latest_sample')
-    assert {row[position][1] for row in series['rows']} == set(range(len(series['latest_sample_time_dictionary'])))
+    assert {row[position]['observed_at_ref'] if isinstance(row[position],dict) else row[position][1] for row in series['rows']} == set(range(len(series['latest_sample_time_dictionary'])))
 
 
 @pytest.mark.parametrize('stamp', ['2026-11-15T05:59:59Z', '2026-11-15T06:07:00Z'])
@@ -84,7 +84,7 @@ def test_latest_sample_outside_frozen_window_is_not_presented_as_current(stamp):
     result=pack(bundle)
     assert 'manifest:request' not in samples(result)
     series=result['numeric_series']
-    assert series['rows'][0][series['columns'].index('latest_sample')][0] is None
+    assert series['rows'][0][series['columns'].index('latest_sample')]['value'] is None
 
 
 def test_raw_trigger_latest_pair_does_not_select_old_first():
@@ -128,7 +128,7 @@ def test_first_request_pruning_does_not_leave_orphan_time_dictionary_entries():
     initial=context.compact_initial(measured_bundle())
     assert context.trim_numeric_summary(initial)
     series=initial['numeric_series'];position=series['columns'].index('latest_sample')
-    assert {row[position][1] for row in series['rows']}==set(range(len(series['latest_sample_time_dictionary'])))
+    assert {row[position]['observed_at_ref'] if isinstance(row[position],dict) else row[position][1] for row in series['rows']}==set(range(len(series['latest_sample_time_dictionary'])))
 
 
 def test_valid_and_missing_latest_raw_samples_round_trip_together():

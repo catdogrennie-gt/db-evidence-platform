@@ -400,7 +400,7 @@ def test_live_context_covers_signal_mechanisms_and_normal_dimensions_with_same_b
     series=context['numeric_series'];columns=series['columns']
     retained={dict(zip(columns,row))['itemid'] for row in series['rows']}
     cols=context['numeric_observation_columns']
-    actual={item['numeric_observation'][cols.index('data.item.itemid')]
+    actual={item.get('itemid',item['numeric_observation'][cols.index('data.item.itemid')] if 'data.item.itemid' in cols else None)
             for item in context['evidence'] if 'numeric_observation' in item}
     assert {str(700+i) for i in range(26)}.issubset(retained|actual), (len(retained),len(context['inspection_signals']),
         len(json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode())+512)

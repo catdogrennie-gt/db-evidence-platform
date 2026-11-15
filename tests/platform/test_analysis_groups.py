@@ -479,8 +479,8 @@ def test_real_model_payload_keeps_large_group_numeric_context_and_frozen_tool(gr
             assert len(json.dumps(payload,ensure_ascii=False,separators=(',',':')).encode())+512>12000
             assert {row[columns.index('hostid')] for row in rows}=={'101','102'}
             assert {row[columns.index('itemid')] for row in rows}.issubset({str(100+i) for i in range(18)})
-            assert all(row[columns.index('latest_sample')][0]==(None if missing_last and row[columns.index('itemid')]=='117' else 17) for row in rows)
-            assert all(series['latest_sample_time_dictionary'][row[columns.index('latest_sample')][1]]
+            assert all(row[columns.index('latest_sample')]['value']==(None if missing_last and row[columns.index('itemid')]=='117' else 17) for row in rows)
+            assert all(series['latest_sample_time_dictionary'][row[columns.index('latest_sample')]['observed_at_ref']]
                        for row in rows if row[columns.index('sample_count')])
             assert series['omitted_count']==18-len(rows)
             if active_lock:

@@ -260,10 +260,56 @@ def context_refs(bundle):
     return {item['evidence_id'] for item in bundle.get('evidence',[])} | {row[0] for row in (bundle.get('numeric_series') or {}).get('rows',[])}
 
 
+def _shorten_display_names(series):
+    columns=series.get('columns',[])
+    if 'name' not in columns:return False
+    position=columns.index('name'); rows=series.get('rows',[])
+    names=[row[position] for row in rows]
+    shortened=[name[:12] if isinstance(name,str) else name for name in names]
+    if names==shortened:return False
+    # Display labels are untrusted presentation, not metric identity or units.
+    # Only use this representation if the explicit omission flag still saves bytes.
+    saved=sum(len(json.dumps(old,ensure_ascii=False).encode())-len(json.dumps(new,ensure_ascii=False).encode())
+              for old,new in zip(names,shortened))
+    if saved<=len(',"display_names_truncated":true'):return False
+    for row,name in zip(rows,shortened):row[position]=name
+    series['display_names_truncated']=True
+    return True
+
+
+def _compact_direct_fields(bundle):
+    """Prefer the old lossless encoding to dropping a measured dimension."""
+    candidate=deepcopy(bundle)
+    changed=False;series=candidate.get('numeric_series') or {};columns=series.get('columns',[])
+    if 'latest_sample' in columns:
+        position=columns.index('latest_sample')
+        for row in series.get('rows',[]):
+            point=row[position]
+            if isinstance(point,dict):
+                row[position]=[point['value'],point['observed_at_ref']];changed=True
+        if changed:series['latest_sample_columns']=['value','observed_at_ref']
+    entries=candidate.get('evidence',[]);columns=candidate.get('numeric_observation_columns',[])
+    direct=[item for item in entries if isinstance(item.get('numeric_observation'),list) and 'itemid' in item]
+    if direct and 'data.item.itemid' not in columns:
+        position=next((i for i,key in enumerate(columns) if key>'data.item.itemid'),len(columns))
+        columns.insert(position,'data.item.itemid')
+        for item in entries:
+            if isinstance(item.get('numeric_observation'),list):
+                item['numeric_observation'].insert(position,item.pop('itemid',None))
+        changed=True
+    size=lambda value:len(json.dumps(value,ensure_ascii=False,separators=(',',':')).encode())
+    if changed and size(candidate)<size(bundle):
+        bundle.clear();bundle.update(candidate)
+        return True
+    return False
+
+
 def trim_numeric_summary(bundle):
     """Prefer coverage of distinct dimensions before duplicate trigger windows."""
     series=bundle.get('numeric_series') or {};rows=series.get('rows',[])
     if not rows:return False
+    if _shorten_display_names(series):return True
+    if _compact_direct_fields(bundle):return True
     columns=bundle.get('numeric_observation_columns',[])
     index=columns.index('data.numeric_series_ref') if 'data.numeric_series_ref' in columns else None
     observations=[item['numeric_observation'] for item in bundle.get('evidence',[])
@@ -327,6 +373,11 @@ def _encode_numeric_context(initial):
         flattened=[]
         for item in numeric:
             values=flatten({key:value for key,value in item.items() if key!='evidence_id'})
+            if values.get('data.numeric_series_ref') is None:values.pop('data.numeric_series_ref',None)
+            # Put the actual metric identity beside its citation. Do not make
+            # the model recover it from a distant positional metadata column.
+            if isinstance((item.get('data') or {}).get('item'),dict):
+                values.pop('data.item.itemid',None)
             for key in ('observed_at','data.first_time','data.last_time','data.latest_sample.observed_at'):
                 if isinstance(values.get(key),str):values[key+'_ref']=time_ref(values.pop(key))
             points=values.get('data.rows',[])
@@ -343,6 +394,9 @@ def _encode_numeric_context(initial):
         initial['numeric_observation_columns']=columns
         by_id=dict(zip((item['evidence_id'] for item in numeric),encoded))
         initial['evidence']=[{'evidence_id':item['evidence_id'],
+                             **({'itemid':item['data']['item']['itemid']}
+                                if isinstance((item.get('data') or {}).get('item'),dict)
+                                and 'itemid' in item['data']['item'] else {}),
                              'numeric_observation':by_id[item['evidence_id']]}
                             if item['evidence_id'] in by_id else item for item in initial['evidence']]
     calculations=[]
@@ -488,6 +542,7 @@ def _unpack_final_tables(initial):
         decoded=fields(result.get('numeric_observation_columns',[]),item['numeric_observation'],
                        result.get('numeric_observation_dictionaries',{}))
         decoded['evidence_id']=item['evidence_id']
+        if 'itemid' in item:decoded.setdefault('data',{}).setdefault('item',{})['itemid']=item['itemid']
         for point in (decoded.get('data') or {}).get('rows',[]):
             if 'time_ref' in point:point['time']=times[point.pop('time_ref')]
         result['evidence'][index]=decoded
@@ -504,10 +559,14 @@ def _compact_latest_sample_times(series):
     if 'latest_sample' not in series.get('columns',[]):return
     position=series['columns'].index('latest_sample')
     dictionary=series['latest_sample_time_dictionary']
-    used=sorted({row[position][1] for row in series.get('rows',[])})
+    used=sorted({row[position]['observed_at_ref'] if isinstance(row[position],dict)
+                 else row[position][1] for row in series.get('rows',[])})
     replacements={old:new for new,old in enumerate(used)}
     series['latest_sample_time_dictionary']=[dictionary[old] for old in used]
-    for row in series.get('rows',[]):row[position][1]=replacements[row[position][1]]
+    for row in series.get('rows',[]):
+        point=row[position]
+        if isinstance(point,dict):point['observed_at_ref']=replacements[point['observed_at_ref']]
+        else:point[1]=replacements[point[1]]
 
 
 def _pair_latest_numeric_samples(container):
@@ -515,7 +574,14 @@ def _pair_latest_numeric_samples(container):
     series=container.get('numeric_series')
     if not isinstance(series,dict) or not series.get('rows'):return
     columns=series.get('columns',[])
-    if 'latest_sample' in columns:return
+    if 'latest_sample' in columns:
+        position=columns.index('latest_sample')
+        for row in series['rows']:
+            if isinstance(row[position],list):
+                value,stamp_ref=row[position]
+                row[position]={'value':value,'observed_at_ref':stamp_ref}
+        series.pop('latest_sample_columns',None)
+        return
     if 'last' not in columns:return
     time_column=next((key for key in ('last_time','last_time_ref') if key in columns),None)
     if time_column is None:return
@@ -537,12 +603,11 @@ def _pair_latest_numeric_samples(container):
         if (stamp is None or type(count) is not int or count<=0 or type(value) not in (int,float)
                 or isinstance(value,float) and not math.isfinite(value)):value=None
         if stamp not in times:times.append(stamp)
-        row[value_index]=[value,times.index(stamp)]
+        row[value_index]={'value':value,'observed_at_ref':times.index(stamp)}
         del row[time_index]
     columns[value_index]='latest_sample'
     del columns[time_index]
     series.pop('last_time_dictionary',None)
-    series['latest_sample_columns']=['value','observed_at_ref']
     series['latest_sample_time_dictionary']=times
     series['summary_scope']='frozen_retained_samples_only'
 def compact_final_context(initial, *, max_bytes, measure, protected_evidence_ids=()):
@@ -558,6 +623,8 @@ def compact_final_context(initial, *, max_bytes, measure, protected_evidence_ids
     original.setdefault('coverage',{})['retained_evidence_count']=len(original.get('evidence',[]))
     refresh_snapshot_chronology(original,sort=True)
     if measure(original)<=max_bytes:return original
+    compacted=deepcopy(original)
+    if _compact_direct_fields(compacted) and measure(compacted)<=max_bytes:return compacted
     working=_unpack_final_tables(original)
     protected=set(protected_evidence_ids) | snapshot_boundary_refs(working.get('evidence',[]))
     protected.update(ref for signal in working.get('inspection_signals',[])
@@ -604,6 +671,9 @@ def compact_final_context(initial, *, max_bytes, measure, protected_evidence_ids
         _encode_numeric_context(result)
         result.setdefault('coverage',{})['retained_evidence_count']=len(result.get('evidence',[]))
         refresh_snapshot_chronology(result,sort=True)
+        if measure(result)>max_bytes:
+            compacted=deepcopy(result)
+            if _compact_direct_fields(compacted) and measure(compacted)<measure(result):return compacted
         return result
     def thin_points(limit):
         for item in working.get('evidence',[]):
@@ -642,6 +712,7 @@ def compact_final_context(initial, *, max_bytes, measure, protected_evidence_ids
         if isinstance(meta,dict):
             for name in ('name','key','interval','interval_verified','history_semantics'):
                 meta.pop(name,None)
+    _shorten_display_names(working.get('numeric_series') or {})
     result=packed()
     if measure(result)<=max_bytes:return result
     omit_series_columns({'key','sampling_method'})

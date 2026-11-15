@@ -107,9 +107,10 @@ def test_nonempty_protected_table_keeps_its_decodable_values_and_source_identity
     for name in ('evidence_id', 'hostid', 'itemid', 'sample_count', 'value_semantics'):
         assert fields[name] == values[name]
     assert packed['resources'][fields['resource']] == series['resources'][0]
-    latest_value, latest_time_ref = fields['latest_sample']
+    latest_point = fields['latest_sample']
+    latest_value, latest_time_ref = (latest_point['value'], latest_point['observed_at_ref']) if isinstance(latest_point,dict) else latest_point
     assert latest_value == values['last']
-    assert packed['latest_sample_columns'] == ['value', 'observed_at_ref']
+    if not isinstance(latest_point,dict):assert packed['latest_sample_columns']==['value','observed_at_ref']
     assert packed['latest_sample_time_dictionary'][latest_time_ref] == '2026-11-13T01:00:00Z'
     for name, value in fields.items():
         if name.endswith('_ref'):

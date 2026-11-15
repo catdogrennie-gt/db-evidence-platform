@@ -44,7 +44,11 @@ def measured_context():
         'to':'2026-11-12T09:00:00Z','evidence':evidence,'numeric_series':series,
         'inspection_signals':signals,'coverage':{'complete':False,'gaps':['known_source_gap']}}
     packed=context.compact_initial(bundle)
-    for _ in range(6):context.trim_numeric_summary(packed)
+    # Retain the original fixture: omit exactly six duplicate series. Display
+    # shortening/lossless encoding steps are not measured-dimension omissions.
+    while packed['numeric_series']['omitted_count']<6:
+        assert context.trim_numeric_summary(packed)
+    assert len(packed['numeric_series']['rows'])==20
     return packed
 
 

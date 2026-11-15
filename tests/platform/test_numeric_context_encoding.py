@@ -29,7 +29,8 @@ def test_compact_numeric_metadata_is_lossless_and_does_not_mutate_frozen_project
     for original, encoded in zip(rows, series['rows']):
         values = dict(zip(series['columns'], encoded))
         assert len(encoded)==len(series['columns'])==len(original)-1
-        latest_value,latest_time_ref=values.pop('latest_sample')
+        latest_point=values.pop('latest_sample')
+        latest_value,latest_time_ref=latest_point['value'],latest_point['observed_at_ref']
         values['last']=latest_value
         values['last_time']=series['latest_sample_time_dictionary'][latest_time_ref]
         for field in ('reason_codes', 'sampling_method', 'semantics_source','first_time'):
