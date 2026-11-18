@@ -12,11 +12,11 @@ DB Evidence Platform 是一个基于已有监控数据的 **AI 数据库运维�
 
 ## 在线体验
 
-**[打开完整平台，查看监控、问题与分析报告](https://screens-sponsor-kijiji-julie.trycloudflare.com)**
+**[打开完整平台，查看监控、问题与分析报告](https://vacuum-mystery-ruby-lip.trycloudflare.com)**
 
 只读账号：`demo` / `EvidenceDemo-2026!`。当前使用临时网址，依赖演示电脑在线。
 
-**[快速演示：连接余量风险](https://representatives-remedies-eva-effectively.trycloudflare.com)**，免登录。当前只开放这一已验证的基础场景；完整平台用于查看全部获授权数据与报告。两处默认关闭自动刷新。
+**[快速演示：连接余量风险](https://designed-where-clouds-strings.trycloudflare.com)**，免登录。当前只开放这一已验证的基础场景；完整平台用于查看全部获授权数据与报告。两处默认关闭自动刷新。
 
 <details>
 <summary>快速演示操作与验证范围</summary>
@@ -38,7 +38,7 @@ DB Evidence Platform 是一个基于已有监控数据的 **AI 数据库运维�
 
 ### 如何看出联合分析的价值
 
-先从容易核对的普通问题开始：[锁等待记录](https://screens-sponsor-kijiji-julie.trycloudflare.com/issues/5d52a1d9-8b3e-4c66-9776-c8f7d95d5314)和[连接容量风险记录](https://screens-sponsor-kijiji-julie.trycloudflare.com/issues/c9608395-38b9-412d-83d6-4e895d496820)保留了实际数据与后续恢复观测，也可从首页“最近已恢复的问题”查看。[本轮行锁报告](https://screens-sponsor-kijiji-julie.trycloudflare.com/investigations/1e980aff-537f-45e4-b32d-af6bb8f24288)已验证瞬时等待关系；连接水位风险的基础闭环也已验证。具体 SQL、复杂根因和后续恢复推断仍按场景单独验收，不把基础成功当作全面诊断能力。
+先从容易核对的普通问题开始：[锁等待记录](https://vacuum-mystery-ruby-lip.trycloudflare.com/issues/5d52a1d9-8b3e-4c66-9776-c8f7d95d5314)和[连接容量风险记录](https://vacuum-mystery-ruby-lip.trycloudflare.com/issues/c9608395-38b9-412d-83d6-4e895d496820)保留了实际数据与后续恢复观测，也可从首页“最近已恢复的问题”查看。[本轮行锁报告](https://vacuum-mystery-ruby-lip.trycloudflare.com/investigations/1e980aff-537f-45e4-b32d-af6bb8f24288)已验证瞬时等待关系；连接水位风险的基础闭环也已验证。具体 SQL、复杂根因和后续恢复推断仍按场景单独验收，不把基础成功当作全面诊断能力。
 
 <details>
 <summary>开发验证记录与当前不足</summary>
